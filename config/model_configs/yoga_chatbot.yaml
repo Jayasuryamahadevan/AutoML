@@ -1,0 +1,51 @@
+# Yoga Training Chatbot Configuration
+
+task_name: "yoga_training_chatbot"
+description: "A helpful chatbot for yoga instruction, poses, breathing techniques, and sequences"
+
+# Dataset Generation Prompts
+dataset_generation:
+  domain: "yoga and meditation instruction"
+  
+  categories:
+    - name: "yoga_poses"
+      description: "Detailed instructions for various yoga asanas"
+      examples: 30
+      
+    - name: "breathing_techniques"
+      description: "Pranayama and breathing exercises"
+      examples: 20
+      
+    - name: "sequences"
+      description: "Yoga sequences for different levels and goals"
+      examples: 20
+      
+    - name: "modifications"
+      description: "Pose modifications for different abilities"
+      examples: 15
+      
+    - name: "general_guidance"
+      description: "General yoga advice, philosophy, and safety"
+      examples: 15
+
+  tone: "calm, instructional, supportive"
+  safety_guidelines:
+    - "Always remind users to listen to their body"
+    - "Suggest modifications for injuries"
+    - "Emphasize proper breathing"
+    - "Encourage gradual progress"
+
+# Evaluation Test Cases
+evaluation:
+  test_questions:
+    - "What are the steps to perform Downward Facing Dog?"
+    - "Suggest a morning yoga routine for beginners"
+    - "How can I modify Chair Pose if I have knee pain?"
+    - "Explain the benefits of Sun Salutation"
+    - "What breathing technique helps with anxiety?"
+    
+  expected_qualities:
+    - "Clear step-by-step instructions"
+    - "Safety considerations mentioned"
+    - "Appropriate tone (calm, supportive)"
+    - "Accurate yoga terminology"

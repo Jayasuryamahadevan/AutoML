@@ -1,0 +1,113 @@
+# Base Configuration for Agentic SLM Training System
+
+system:
+  name: "AutoSLM-v2"
+  version: "1.0.0"
+  device: "auto"  # auto, cuda, cpu
+  
+# Model Configuration
+models:
+  base_model: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"  # Open model, no login required
+  max_seq_length: 2048
+  load_in_4bit: false  # Disabled temporarily due to bitsandbytes version mismatch
+  
+  # LoRA Configuration
+  lora:
+    rank: 16
+    alpha: 16
+    dropout: 0.0
+    target_modules:
+      - "q_proj"
+      - "k_proj"
+      - "v_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+    use_gradient_checkpointing: true
+  
+  # Quantization (QLoRA)
+  quantization:
+    load_in_4bit: true
+    bnb_4bit_compute_dtype: "float16"
+    bnb_4bit_quant_type: "nf4"
+    bnb_4bit_use_double_quant: true
+
+# Training Hyperparameters
+training:
+  default_profile: "balanced"
+  
+  # Learning rate bounds for auto-adjustment
+  learning_rate:
+    default: 2.0e-4
+    min: 5.0e-5
+    max: 5.0e-4
+  
+  max_steps: 100
+  warmup_steps: 10
+  batch_size: 2
+  gradient_accumulation_steps: 4
+  
+  # Training optimization
+  fp16: false
+  bf16: true
+  optim: "adamw_8bit"
+  weight_decay: 0.01
+  lr_scheduler_type: "linear"
+  seed: 42
+
+# Dataset Generation
+dataset:
+  min_examples: 50
+  max_examples: 200
+  test_split: 0.1
+  
+  # Ollama settings for data generation
+  ollama:
+    model: "llama3.2:3b"
+    temperature: 0.8
+    num_ctx: 4096
+
+# Evaluation Settings
+evaluation:
+  pass_threshold: 8.0  # Score must be >= 8.0 to pass
+  
+  # Critic/Judge settings
+  judge:
+    model: "llama3.2:3b"  # or "gpt-4o-mini" if using OpenAI
+    temperature: 0.3
+    scoring_dimensions:
+      - "accuracy"
+      - "tone"
+      - "completeness"
+      - "safety"
+
+# Orchestration
+orchestration:
+  max_iterations: 3
+  
+  # Retry strategy
+  retry:
+    enabled: true
+    learning_rate_decay: 0.5  # Multiply LR by this on retry
+    epochs_increment: 0.2     # Increase epochs by 20%
+
+# Storage
+storage:
+  type: "local"  # local, s3, huggingface
+  artifacts_dir: "outputs"
+  models_dir: "outputs/models"
+  adapters_dir: "outputs/adapters"
+  reports_dir: "outputs/reports"
+
+# MLflow (optional)
+mlflow:
+  enabled: false
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "autoslm-experiments"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "autoslm.log"
