@@ -1,0 +1,7 @@
+numpy>=2.0
+pandas>=2.2
+scikit-learn>=1.5
+streamlit>=1.38
+ucimlrepo>=0.0.7
+git+https://github.com/aolabsai/ao_arch
+# ao_core is private beta and must be installed after AO Labs grants access.
