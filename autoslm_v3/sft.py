@@ -256,7 +256,7 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
     """Train LoRA adapter, select by validation loss, then evaluate locked test once."""
     config.validate()
     torch, Dataset, LoraConfig, get_peft_model, prepare_model_for_kbit_training, \
-        AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments = _require_ml_dependencies()
+        AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, TrainerCallback = _require_ml_dependencies()
     if not torch.cuda.is_available() and not config.allow_cpu:
         raise RuntimeError("CUDA is unavailable. Set allow_cpu only for smoke tests; RTX 3050 training requires CUDA.")
     if not torch.cuda.is_available() and config.use_4bit:
