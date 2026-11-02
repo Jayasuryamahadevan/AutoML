@@ -87,15 +87,15 @@ def test_cpt_chunker_keeps_short_final_blocks():
     from autoslm_v3.cpt import chunk_texts
     class TinyTokenizer:
         def __call__(self, text, add_special_tokens=True):
-            return {"input_ids": [1, 2, 3, 4, 5, 6]}
-    chunks=chunk_texts([{"text":"short"}],TinyTokenizer(),block_size=4)
-    assert [len(x["input_ids"]) for x in chunks]==[4,2]
+            return {"input_ids": list(range(34))}
+    chunks=chunk_texts([{"text":"short"}],TinyTokenizer(),block_size=32)
+    assert [len(x["input_ids"]) for x in chunks]==[32,2]
     assert chunks[0]["labels"]==chunks[0]["input_ids"]
 
 
 def test_benchmark_rejects_non_object_and_output_overwrite(tmp_path):
     bad=tmp_path/"bad.jsonl"
-    bad.write_text("[]\\n"+"\\n".join(json.dumps({"id":str(i),"task":"qa","prompt":"p","reference":"r","source":"review","license":"consent","split":"test"}) for i in range(10)),encoding="utf-8")
+    bad.write_text("[]"+"\\n"+"\\n".join(json.dumps({"id":str(i),"task":"qa","prompt":"p","reference":"r","source":"review","license":"consent","split":"test"}) for i in range(10)),encoding="utf-8")
     with pytest.raises(ValueError,match="JSON object"):
         load_locked_benchmark(str(bad))
     good=tmp_path/"good.jsonl"; _benchmark(good)
