@@ -31,27 +31,71 @@ def dataset_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
         domain_config_path=domain_config
     )
     
-    # Save dataset
+    # Split and deduplicate BEFORE writing any training artifacts. The locked
+    # test partition is never passed to the generator or trainer.
+    from autoslm_v3.data import split_dataset
+
+    split = split_dataset(
+        [example.dict() for example in dataset.examples],
+        test_fraction=config.get("dataset", {}).get("test_split", 0.1),
+        validation_fraction=0.1,
+        seed=config.get("training", {}).get("seed", 42),
+    )
+
     dataset_path = Path('data/datasets') / f"{state['job_id']}_train.jsonl"
-    dataset_path.parent.mkdir(parents=True, exist_ok=True)
-    dataset.to_jsonl(str(dataset_path))
-    
-    # Create test set
-    test_dataset = generator.create_test_set(dataset, test_split=0.1)
+    validation_path = Path('data/validation_sets') / f"{state['job_id']}_validation.jsonl"
     test_path = Path('data/test_sets') / f"{state['job_id']}_test.json"
-    test_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save test set with full examples (not just JSONL)
-    test_data = [ex.dict() for ex in test_dataset.examples]
-    with open(test_path, 'w') as f:
-        json.dump(test_data, f, indent=2)
-    
-    console.print(f"[green]✓ Dataset saved: {dataset_path}[/green]")
-    console.print(f"[green]✓ Test set saved: {test_path}[/green]")
-    
+    for path in (dataset_path, validation_path, test_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_training_jsonl(path, rows):
+        with path.open("w", encoding="utf-8") as stream:
+            for example in rows:
+                record = {
+                    "instruction": example["instruction"],
+                    "input": "",
+                    "output": example["response"],
+                }
+                stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
+
+    write_training_jsonl(dataset_path, split.train)
+    write_training_jsonl(validation_path, split.validation)
+
+    # Strip internal split hashes from the held-out test artifact.
+    test_data = [
+        {
+            "instruction": example["instruction"],
+            "response": example["response"],
+            "category": example.get("category"),
+            "metadata": example.get("metadata") or {},
+        }
+        for example in split.test
+    ]
+    with test_path.open("w", encoding="utf-8") as stream:
+        json.dump(test_data, stream, ensure_ascii=False, indent=2)
+
+    manifest_path = Path("data/manifests") / f"{state['job_id']}_dataset.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "dataset_fingerprint": split.fingerprint,
+        "duplicates_removed": split.duplicates_removed,
+        "train_examples": len(split.train),
+        "validation_examples": len(split.validation),
+        "test_examples": len(split.test),
+        "seed": config.get("training", {}).get("seed", 42),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    console.print(f"[green]✓ Training dataset saved: {dataset_path} ({len(split.train)} examples)[/green]")
+    console.print(f"[green]✓ Validation dataset saved: {validation_path} ({len(split.validation)} examples)[/green]")
+    console.print(f"[green]✓ Locked test set saved: {test_path} ({len(split.test)} examples)[/green]")
+
     return {
         "dataset_path": str(dataset_path),
+        "validation_set_path": str(validation_path),
         "test_set_path": str(test_path),
+        "dataset_fingerprint": split.fingerprint,
+        "dataset_manifest_path": str(manifest_path),
         "status": "dataset_ready"
     }
 
