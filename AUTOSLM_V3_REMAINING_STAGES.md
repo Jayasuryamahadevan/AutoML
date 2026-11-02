@@ -72,3 +72,14 @@ The experimental trainer uses the PEFT adapter as the policy and disables it to 
 4. Reload the adapter through `scripts/evaluate_benchmark.py`.
 5. Compare base/candidate on the independent locked benchmark.
 6. Only then run CPT or DPO. Start with a small dataset and compare against the same baseline benchmark.
+
+
+## Compare two saved benchmark reports
+
+After evaluating the base and adapter with the exact same locked benchmark:
+
+```bash
+python scripts/compare_benchmarks.py --baseline outputs/base-report.json --candidate outputs/candidate-report.json --output outputs/comparison.json
+```
+
+The command rejects reports with different benchmark fingerprints or task coverage. The resulting metric deltas remain lexical diagnostics; promotion still requires task-specific tests, safety checks and human review.
