@@ -339,22 +339,20 @@ def adjustment_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def deploy_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Deploy the final model."""
-    console.print(f"\n[bold green]🚀 Node: Deployment[/bold green]")
-    
-    # In a real system, this would:
-    # - Push to model registry (HuggingFace Hub, S3, etc.)
-    # - Create deployment config
-    # - Notify monitoring systems
-    
-    console.print(f"[green]✓ Model deployed successfully![/green]")
+    console.print(f"\n[bold green]📦 Node: Candidate Artifact Acceptance[/bold green]")
+
+    # This repository does not yet implement a model registry or serving rollout.
+    # Do not claim production deployment when only local artifacts exist.
+    console.print("[yellow]Candidate passed the current evaluation gate. Artifacts remain local; production deployment is not configured.[/yellow]")
     console.print(f"   Adapter: {state['adapter_path']}")
     console.print(f"   Model: {state.get('model_path', 'N/A')}")
     console.print(f"   Validation score: {state['evaluation_score']:.2f}/10")
     console.print(f"   Locked test score: {state.get('final_test_score', 0.0):.2f}/10")
     
     return {
-        "status": "deployed",
+        "status": "candidate_accepted_not_deployed",
         "deployment_info": {
+            "release_status": "not_deployed",
             "adapter_path": state['adapter_path'],
             "model_path": state.get('model_path'),
             "validation_score": state['evaluation_score'],
