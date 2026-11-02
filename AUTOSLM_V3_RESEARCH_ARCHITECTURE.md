@@ -66,7 +66,11 @@ LoRA/QLoRA is an implementation strategy, not a training stage. It can be used f
 
 ## Current implementation boundary
 
-This branch adds the stage planner, deterministic leakage-resistant dataset splitting, evaluation gates and experiment manifests as a foundation. It does not claim that full pretraining, continued pretraining, DPO, GRPO, a model registry or production deployment are implemented. Those require dedicated trainer backends, dataset adapters, hardware integration and end-to-end tests on actual accelerators.
+This branch adds the stage planner, deterministic leakage-resistant dataset splitting, evaluation gates and experiment manifests. The legacy LangGraph workflow now separates iterative validation from a one-time held-out test pass, and no longer reports local artifacts as production deployment.
+
+Important limitation: the current legacy generator creates synthetic examples in one generation workflow, then partitions them. This prevents exact/prompt-level overlap from entering both train and holdout, but it does not make the holdout an independently sourced, human-validated benchmark. Its score is provisional and must not be presented as proof of real-world generalization. A proper release gate still requires an externally curated locked test set, source/document-level splits before synthetic augmentation, calibrated evaluation metrics and human review where appropriate.
+
+Full pretraining, continued-pretraining trainer backends, DPO, GRPO, a model registry and production serving are not implemented. Those require dedicated trainer backends, dataset adapters, hardware integration and end-to-end tests on actual accelerators.
 
 ## Research references
 
