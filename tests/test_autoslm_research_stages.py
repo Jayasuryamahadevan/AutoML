@@ -78,7 +78,7 @@ def test_preference_pairs_require_provenance_and_distinct_answers():
 def test_new_stage_cli_help_is_cpu_safe():
     import subprocess, sys
     root=Path(__file__).resolve().parents[1]
-    for name,expected in (("train_cpt.py","--domain-corpus"),("train_dpo.py","--allowed-licenses"),("evaluate_benchmark.py","--benchmark"),("profile_gpu.py","--load-model"),("compare_benchmarks.py","--baseline"),("model_registry.py","--help")):
+    for name,expected in (("train_cpt.py","--domain-corpus"),("train_dpo.py","--allowed-licenses"),("evaluate_benchmark.py","--benchmark"),("profile_gpu.py","--load-model"),("compare_benchmarks.py","--baseline"),("model_registry.py","--help"),("export_gguf.py","--base-model"),("deploy_ollama.py","--gguf")):
         result=subprocess.run([sys.executable,str(root/"scripts"/name),"--help"],cwd=root,capture_output=True,text=True)
         assert result.returncode==0,result.stderr
         assert expected in result.stdout
