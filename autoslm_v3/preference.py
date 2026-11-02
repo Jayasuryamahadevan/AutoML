@@ -50,7 +50,10 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
     if len(rows)<10: raise ValueError("DPO requires at least 10 reviewed preference pairs")
     groups={}
     for row in rows: groups.setdefault(row["prompt"],[]).append(row)
-    keys=list(groups); random.Random(config.seed).shuffle(keys)
+    keys=list(groups)
+    if len(keys)<3:
+        raise ValueError("DPO requires at least three distinct prompts to create train, validation and test partitions")
+    random.Random(config.seed).shuffle(keys)
     n_test=max(1,int(len(keys)*config.test_fraction)); n_val=max(1,int(len(keys)*config.validation_fraction))
     test_keys=set(keys[:n_test]); val_keys=set(keys[n_test:n_test+n_val]); train_keys=set(keys[n_test+n_val:])
     if not train_keys: raise ValueError("DPO prompt split leaves no training examples")
@@ -76,6 +79,8 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             batch[name+"_labels"]=torch.tensor([x[name+"_labels"]+[-100]*(maximum-len(x[name+"_labels"])) for x in items],dtype=torch.long)
         return batch
     train=[x for k in train_keys for x in groups[k]]; val=[x for k in val_keys for x in groups[k]]; test=[x for k in test_keys for x in groups[k]]
+    if not train or not val or not test:
+        raise ValueError("DPO split must produce non-empty train, validation and test pairs")
     train_ds=Dataset.from_list(encode(train)); val_ds=Dataset.from_list(encode(val)); test_ds=Dataset.from_list(encode(test))
     q=BitsAndBytesConfig(load_in_4bit=True,bnb_4bit_quant_type="nf4",bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype=torch.float16)
     model=AutoModelForCausalLM.from_pretrained(config.model_name_or_path,quantization_config=q,device_map={"":0},torch_dtype=torch.float16,trust_remote_code=config.trust_remote_code)
