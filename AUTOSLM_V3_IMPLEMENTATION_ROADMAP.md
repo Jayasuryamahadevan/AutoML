@@ -11,7 +11,9 @@ This roadmap is intentionally gated by measurable acceptance criteria. A stage i
 - [x] Experiment manifest with config and dataset fingerprints.
 - [x] Initial unit tests.
 - [ ] CI result green on GitHub Actions.
-- [ ] Integrate split-before-synthetic-generation into legacy data generator.
+- [x] Integrate group-aware train/validation/holdout partitioning into the legacy workflow; retries now use validation and the held-out set is evaluated once.
+- [ ] Replace synthetic-only holdout with an externally curated, human-reviewed locked benchmark.
+- [ ] Split source documents/tasks before synthetic augmentation when source corpora are available.
 - [ ] Add source/license/provenance schema and persistent immutable dataset registry.
 
 ## Milestone 1 — Data engine
