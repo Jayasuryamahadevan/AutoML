@@ -41,9 +41,10 @@ def chunk_texts(rows, tokenizer, block_size: int=512):
     chunks=[]
     for row in rows:
         ids=tokenizer(str(row["text"]),add_special_tokens=True)["input_ids"]
-        for start in range(0,len(ids)-block_size+1,block_size):
+        for start in range(0,len(ids),block_size):
             chunk=ids[start:start+block_size]
-            chunks.append({"input_ids":chunk,"attention_mask":[1]*len(chunk),"labels":chunk.copy()})
+            if len(chunk)>1:
+                chunks.append({"input_ids":chunk,"attention_mask":[1]*len(chunk),"labels":chunk.copy()})
     if not chunks: raise ValueError("corpus produced no full token blocks")
     return chunks
 
@@ -53,7 +54,8 @@ def run_cpt(domain_path: str, replay_path: str, config: SFTConfig,
     torch, Dataset, LoraConfig, get_peft_model, prepare_model_for_kbit_training, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, TrainerCallback = _require_ml_dependencies()
     if not torch.cuda.is_available() or not config.use_4bit:
         raise RuntimeError("CPT runner currently requires CUDA QLoRA; CPU mode is not supported")
-    domain=load_cpt_corpus(domain_path,allowed_licenses); replay=load_cpt_corpus(replay_path,allowed_licenses)
+    allowed=set(allowed_licenses)
+    domain=load_cpt_corpus(domain_path,allowed); replay=load_cpt_corpus(replay_path,allowed)
     mixed=mix_domain_and_replay(domain,replay,replay_fraction,config.seed)
     groups={}
     for row in mixed: groups.setdefault(row["source"],[]).append(row)
