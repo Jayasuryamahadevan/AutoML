@@ -405,11 +405,11 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
             config.max_new_tokens, config.max_eval_samples,
         )
         (output_dir / "locked_test_predictions.jsonl").write_text(
-            "".join(json.dumps(item, ensure_ascii=False) + "\\n" for item in predictions),
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in predictions),
             encoding="utf-8",
         )
         (output_dir / "base_test_predictions.jsonl").write_text(
-            "".join(json.dumps(item, ensure_ascii=False) + "\\n" for item in baseline_predictions),
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in baseline_predictions),
             encoding="utf-8",
         )
         adapter_dir = output_dir / "adapter"
