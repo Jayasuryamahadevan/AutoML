@@ -284,4 +284,14 @@ python -m pip install -r requirements.txt
 python scripts/train_sft.py --dataset data/train_examples.jsonl --config configs/autoslm_v3_rtx3050.json
 ```
 
-See [AUTOSLM_V3_RTX3050_SFT.md](AUTOSLM_V3_RTX3050_SFT.md) for dataset format, environment checks, resume instructions, artifacts and limitations. The v3 path exports a PEFT adapter; it does not yet implement model merging, GGUF conversion, Ollama deployment, CPT, DPO or GRPO. Run on a CUDA-compatible Linux/WSL2 environment and verify actual peak VRAM on the target laptop before scaling up.
+See [AUTOSLM_V3_RTX3050_SFT.md](AUTOSLM_V3_RTX3050_SFT.md) for dataset format, environment checks, resume instructions, artifacts and limitations. The v3 path now includes experimental CPT and DPO runners, independent benchmark evaluation, base-versus-adapter SFT metrics, GPU telemetry and adapter checksums. These paths are not yet hardware-validated. Model merging, GGUF conversion, Ollama deployment, reward-model training and GRPO remain future work. Run on a CUDA-compatible Linux/WSL2 environment and verify actual peak VRAM on the target laptop before scaling up.
+
+
+### Additional v3 stages
+
+- Independent locked benchmark: `scripts/evaluate_benchmark.py`
+- Continued pretraining with general replay: `scripts/train_cpt.py`
+- Direct Preference Optimization: `scripts/train_dpo.py`
+- Adapter SHA-256 integrity: `autoslm_v3/artifacts.py`
+
+See [AUTOSLM_V3_REMAINING_STAGES.md](AUTOSLM_V3_REMAINING_STAGES.md) for input schemas, commands, safety gates and limitations.
