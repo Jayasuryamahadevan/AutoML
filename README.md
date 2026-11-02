@@ -295,3 +295,10 @@ See [AUTOSLM_V3_RTX3050_SFT.md](AUTOSLM_V3_RTX3050_SFT.md) for dataset format, e
 - Adapter SHA-256 integrity: `autoslm_v3/artifacts.py`
 
 See [AUTOSLM_V3_REMAINING_STAGES.md](AUTOSLM_V3_REMAINING_STAGES.md) for input schemas, commands, safety gates and limitations.
+
+
+- Local model registry and evidence-gated promotion: `autoslm_v3/registry.py`, `scripts/model_registry.py`
+- GPU preflight and optional explicit NF4 inference smoke test: `scripts/profile_gpu.py`
+- Locked benchmark comparison: `scripts/compare_benchmarks.py`
+
+See [AUTOSLM_V3_REMAINING_STAGES.md](AUTOSLM_V3_REMAINING_STAGES.md) for exact workflows and remaining hardware-validation requirements.
