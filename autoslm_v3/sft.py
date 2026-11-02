@@ -267,6 +267,8 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
         free_bytes, total_bytes = torch.cuda.mem_get_info()
         if total_bytes < 3.5 * 1024**3:
             raise RuntimeError("Detected less than 3.5 GiB total VRAM; this preset requires a 4 GB-class GPU.")
+    if resume_from_checkpoint and not run_id:
+        raise ValueError("run_id is required when resuming an existing run")
     run_id = run_id or str(uuid.uuid4())
     output_dir = Path(config.output_dir) / run_id
     output_dir.mkdir(parents=True, exist_ok=bool(resume_from_checkpoint))
