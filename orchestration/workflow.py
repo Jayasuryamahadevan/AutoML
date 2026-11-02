@@ -164,9 +164,10 @@ def run_workflow(
         console.print("[bold green]✓ Workflow Complete![/bold green]")
         console.print(f"[bold]Final Status:[/bold] {final_state.get('status')}")
         
-        if final_state.get('status') == 'deployed':
+        if final_state.get('status') == 'candidate_accepted_not_deployed':
             info = final_state.get('deployment_info', {})
-            console.print(f"[bold]Final Test Score:[/bold] {info.get('final_test_score'):.2f}/10")
+            console.print(f"[bold]Final Test Score (provisional):[/bold] {info.get('final_test_score'):.2f}/10")
+            console.print("[yellow]Artifacts accepted locally; no production serving deployment was performed.[/yellow]")
             console.print(f"[bold]Iterations:[/bold] {info.get('iterations')}")
             console.print(f"[bold]Model Path:[/bold] {info.get('adapter_path')}")
         
