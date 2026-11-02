@@ -93,3 +93,25 @@ def test_repository_cli_help_runs_without_ml_runtime(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "--dataset" in result.stdout
     assert "--resume-from-checkpoint" in result.stdout
+
+ 
+def test_messages_format_preserves_chat_roles():
+    from autoslm_v3.sft import _extract_prompt_answer, _format_row_prompt
+    row={"messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Explain LoRA."},{"role":"assistant","content":"Low-rank adaptation."}]}
+    prompt,answer=_extract_prompt_answer(row)
+    assert "system: Be concise." in prompt and "user: Explain LoRA." in prompt
+    assert answer=="Low-rank adaptation."
+    class ChatTokenizer:
+        chat_template="template"
+        def apply_chat_template(self,messages,tokenize,add_generation_prompt):
+            assert messages==row["messages"][:-1]
+            assert tokenize is False and add_generation_prompt is True
+            return "ROLE_PRESERVING_PROMPT"
+    assert _format_row_prompt(ChatTokenizer(),{**row,"instruction":prompt})=="ROLE_PRESERVING_PROMPT"
+
+
+def test_messages_format_rejects_non_final_assistant_turn():
+    from autoslm_v3.sft import _extract_prompt_answer
+    row={"messages":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello"},{"role":"user","content":"Again"},{"role":"assistant","content":"Yes"}]}
+    with pytest.raises(ValueError,match="single final assistant"):
+        _extract_prompt_answer(row)
