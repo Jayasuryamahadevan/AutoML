@@ -16,7 +16,10 @@ def load_cpt_corpus(path: str, allowed_licenses: Iterable[str]) -> List[Dict[str
     with Path(path).open(encoding="utf-8") as stream:
         for n,line in enumerate(stream,1):
             if not line.strip(): continue
-            row=json.loads(line); text=str(row.get("text","")).strip()
+            row=json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError(f"line {n}: corpus row must be a JSON object")
+            text=str(row.get("text","")).strip()
             license_id=str(row.get("license","")).casefold(); source=str(row.get("source","")).strip()
             if not text or not source or license_id not in allowed:
                 raise ValueError(f"line {n}: text, source and explicitly allowed license are required")
@@ -85,6 +88,6 @@ def run_cpt(domain_path: str, replay_path: str, config: SFTConfig,
     adapter=out/"adapter"; trainer.model.save_pretrained(adapter); tokenizer.save_pretrained(adapter)
     artifact=write_adapter_manifest(str(adapter),{"run_id":run_id,"stage":"cpt","base_model":config.model_name_or_path}); integrity=verify_adapter_manifest(str(adapter))
     if not integrity["valid"]: raise RuntimeError("CPT adapter artifact integrity failure")
-    result={"run_id":run_id,"status":"completed","stage":"cpt","train_metrics":trained.metrics,"validation_metrics":validation,"locked_test_metrics":locked_test,"gpu":torch.cuda.get_device_name(0),"peak_allocated_mb":round(torch.cuda.max_memory_allocated()/1024**2,2),"duration_seconds":round(time.time()-started,2),"adapter_path":str(adapter),"artifact_manifest":artifact,"artifact_verification":integrity,"replay_fraction":replay_fraction,"note":"CPT loss does not establish downstream task quality; run independent regression and benchmark suites."}
+    result={"run_id":run_id,"status":"completed","stage":"cpt","train_metrics":trained.metrics,"validation_metrics":validation,"locked_test_metrics":locked_test,"gpu":torch.cuda.get_device_name(0),"gpu_memory":{"peak_allocated_mb":round(torch.cuda.max_memory_allocated()/1024**2,2),"peak_reserved_mb":round(torch.cuda.max_memory_reserved()/1024**2,2),"total_mb":round(torch.cuda.get_device_properties(0).total_memory/1024**2,2)},"duration_seconds":round(time.time()-started,2),"adapter_path":str(adapter),"artifact_manifest":artifact,"artifact_verification":integrity,"replay_fraction":replay_fraction,"note":"CPT loss does not establish downstream task quality; run independent regression and benchmark suites."}
     (out/"result.json").write_text(json.dumps(result,indent=2,default=str),encoding="utf-8"); lineage.append(run_id,"cpt_completed",result)
     return result
