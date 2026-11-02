@@ -99,12 +99,14 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 def _extract_prompt_answer(row: Dict[str, Any]):
     if isinstance(row.get("messages"), list):
         messages = row["messages"]
-        assistant = [m for m in messages if isinstance(m, dict) and m.get("role") == "assistant"]
-        non_assistant = [m for m in messages if isinstance(m, dict) and m.get("role") != "assistant"]
-        if not assistant or not non_assistant:
-            raise ValueError("messages format requires at least one user/system and assistant message")
-        prompt = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in non_assistant)
-        answer = "\n".join(str(m.get("content", "")) for m in assistant)
+        if not all(isinstance(m, dict) and m.get("role") in {"system", "user", "assistant"} for m in messages):
+            raise ValueError("messages format supports only system, user and assistant roles")
+        if messages[-1].get("role") != "assistant" or not any(m.get("role") == "user" for m in messages):
+            raise ValueError("messages format must end with an assistant turn and contain a user turn")
+        if any(m.get("role") == "assistant" for m in messages[:-1]):
+            raise ValueError("messages format currently supports a single final assistant response")
+        prompt = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in messages[:-1])
+        answer = str(messages[-1].get("content", ""))
         return prompt, answer
     prompt = row.get("instruction", row.get("prompt", ""))
     extra = row.get("input", "")
@@ -150,10 +152,19 @@ def _format_prompt(tokenizer, prompt: str) -> str:
     return f"### User:\n{prompt}\n\n### Assistant:\n"
 
 
+def _format_row_prompt(tokenizer, row):
+    messages = row.get("messages")
+    if isinstance(messages, list) and getattr(tokenizer, "chat_template", None):
+        return tokenizer.apply_chat_template(
+            messages[:-1], tokenize=False, add_generation_prompt=True
+        )
+    return _format_prompt(tokenizer, str(row["instruction"]))
+
+
 def _tokenize_rows(rows, tokenizer, max_length):
     encoded = []
     for row in rows:
-        prompt = _format_prompt(tokenizer, str(row["instruction"]))
+        prompt = _format_row_prompt(tokenizer, row)
         answer = str(row["response"])
         eos = tokenizer.eos_token or ""
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
@@ -219,7 +230,7 @@ def evaluate_generation(model, tokenizer, rows, max_input_length: int,
     selected = rows[:max_samples]
     exact, f1, predictions = [], [], []
     for row in selected:
-        prompt = _format_prompt(tokenizer, str(row["instruction"]))
+        prompt = _format_row_prompt(tokenizer, row)
         encoded = tokenizer(prompt, return_tensors="pt", truncation=True,
                             max_length=max_input_length, add_special_tokens=False)
         device = next(model.parameters()).device
