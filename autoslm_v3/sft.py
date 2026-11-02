@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from .data import split_dataset
 from .lineage import LineageStore
 from .manifest import build_experiment_manifest
+from .artifacts import write_adapter_manifest, verify_adapter_manifest
 
 
 @dataclass(frozen=True)
@@ -322,6 +323,12 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
         train_rows = _tokenize_rows(split.train, tokenizer, config.max_seq_length)
         validation_rows = _tokenize_rows(split.validation, tokenizer, config.max_seq_length)
         test_rows = _tokenize_rows(split.test, tokenizer, config.max_seq_length)
+        baseline_generation_metrics, baseline_predictions = evaluate_generation(
+            model, tokenizer, split.test, config.max_seq_length,
+            config.max_new_tokens, config.max_eval_samples,
+        )
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         train_ds = Dataset.from_list(train_rows)
         validation_ds = Dataset.from_list(validation_rows)
         test_ds = Dataset.from_list(test_rows)
@@ -401,16 +408,40 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
             "".join(json.dumps(item, ensure_ascii=False) + "\\n" for item in predictions),
             encoding="utf-8",
         )
+        (output_dir / "base_test_predictions.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\\n" for item in baseline_predictions),
+            encoding="utf-8",
+        )
         adapter_dir = output_dir / "adapter"
         trainer.model.save_pretrained(adapter_dir)
         tokenizer.save_pretrained(adapter_dir)
+        artifact_manifest = write_adapter_manifest(str(adapter_dir), {
+            "run_id": run_id, "base_model": config.model_name_or_path,
+            "dataset_fingerprint": split.fingerprint,
+        })
+        artifact_verification = verify_adapter_manifest(str(adapter_dir))
+        if not artifact_verification["valid"]:
+            raise RuntimeError(f"adapter artifact integrity check failed: {artifact_verification}")
+        gpu_memory = {
+            "peak_allocated_mb": round(torch.cuda.max_memory_allocated() / 1024**2, 2),
+            "peak_reserved_mb": round(torch.cuda.max_memory_reserved() / 1024**2, 2),
+            "total_mb": round(torch.cuda.get_device_properties(0).total_memory / 1024**2, 2),
+        } if torch.cuda.is_available() else None
         result = {
             "run_id": run_id, "status": "completed",
             "adapter_path": str(adapter_dir),
             "train_metrics": train_result.metrics,
             "validation_metrics": validation_metrics,
             "locked_test_metrics": test_metrics,
+            "base_locked_test_generation_metrics": baseline_generation_metrics,
             "locked_test_generation_metrics": generation_metrics,
+            "generation_metric_delta": {
+                "exact_match": generation_metrics["exact_match"] - baseline_generation_metrics["exact_match"],
+                "token_f1": generation_metrics["token_f1"] - baseline_generation_metrics["token_f1"],
+            },
+            "gpu_memory": gpu_memory,
+            "artifact_manifest": artifact_manifest,
+            "artifact_verification": artifact_verification,
             "dataset_fingerprint": split.fingerprint,
             "duration_seconds": round(time.time() - started, 2),
             "manifest_path": str(output_dir / "experiment_manifest.json"),
