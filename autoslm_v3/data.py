@@ -113,7 +113,7 @@ def split_dataset(
 
     groups = {}
     for index, row in enumerate(unique):
-        document_node = "document:" + str(row.get("group_id") or "row:" + str(index))
+        document_node = "document:" + source_group_id(row, "row:" + str(index))
         root = find(document_node)
         groups.setdefault(root, []).append(row)
 
