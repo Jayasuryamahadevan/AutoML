@@ -1,5 +1,6 @@
 """Baseline-relative promotion gates; judge scores are never the sole gate."""
 from dataclasses import dataclass
+from math import isfinite
 from typing import Dict, Optional
 
 
@@ -20,6 +21,28 @@ class PromotionDecision:
     reasons: tuple
 
 
+def _validate_summary(summary: EvaluationSummary) -> None:
+    if summary.sample_count <= 0:
+        raise ValueError("evaluation summaries need non-zero sample counts")
+    for group_name, metrics in (
+        ("task_metrics", summary.task_metrics),
+        ("general_metrics", summary.general_metrics),
+    ):
+        for name, value in metrics.items():
+            if not isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(
+                    f"{group_name}.{name} must be a finite normalized score in [0, 1]"
+                )
+    if summary.latency_ms is not None and (
+        not isfinite(summary.latency_ms) or summary.latency_ms <= 0
+    ):
+        raise ValueError("latency_ms must be positive and finite")
+    if summary.peak_memory_mb is not None and (
+        not isfinite(summary.peak_memory_mb) or summary.peak_memory_mb <= 0
+    ):
+        raise ValueError("peak_memory_mb must be positive and finite")
+
+
 def compare_and_promote(
     baseline: EvaluationSummary,
     candidate: EvaluationSummary,
@@ -28,10 +51,15 @@ def compare_and_promote(
     allowed_general_regression: float = 0.02,
 ) -> PromotionDecision:
     """Conservative gate. Metrics must be normalized higher-is-better scores."""
-    if baseline.sample_count <= 0 or candidate.sample_count <= 0:
-        raise ValueError("both baseline and candidate need non-zero evaluation samples")
+    _validate_summary(baseline)
+    _validate_summary(candidate)
+    if not 0.0 <= minimum_improvement <= 1.0:
+        raise ValueError("minimum_improvement must be in [0, 1]")
+    if not 0.0 <= allowed_general_regression <= 1.0:
+        raise ValueError("allowed_general_regression must be in [0, 1]")
     if primary_metric not in baseline.task_metrics or primary_metric not in candidate.task_metrics:
         raise ValueError("primary metric must exist for both baseline and candidate")
+
     reasons = []
     delta = candidate.task_metrics[primary_metric] - baseline.task_metrics[primary_metric]
     if delta < minimum_improvement:
