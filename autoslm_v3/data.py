@@ -10,11 +10,11 @@ from typing import Dict, List, Sequence
 
 def normalize_text(value: str) -> str:
     value = unicodedata.normalize("NFKC", value or "").casefold()
-    return re.sub(r"\\s+", " ", value).strip()
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def content_hash(example: Dict[str, object]) -> str:
-    canonical = normalize_text(str(example.get("instruction", ""))) + "\\n" + normalize_text(str(example.get("response", "")))
+    canonical = normalize_text(str(example.get("instruction", ""))) + "\n" + normalize_text(str(example.get("response", "")))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -34,7 +34,7 @@ class DatasetSplit:
             path = root / (name + ".jsonl")
             with path.open("w", encoding="utf-8") as stream:
                 for row in rows:
-                    stream.write(json.dumps(row, ensure_ascii=False) + "\\n")
+                    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def split_dataset(
