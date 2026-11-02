@@ -122,3 +122,22 @@ def test_sft_split_keeps_nested_source_documents_together():
             assert source not in assignment or assignment[source]==partition_index
             assignment[source]=partition_index
     assert len(assignment)==12
+
+ 
+def test_adapter_manifest_rejects_symlinks(tmp_path):
+    root=tmp_path/"adapter"; root.mkdir()
+    outside=tmp_path/"outside.txt"; outside.write_text("secret",encoding="utf-8")
+    try:
+        (root/"linked.txt").symlink_to(outside)
+    except (OSError,NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    with pytest.raises(ValueError,match="symlinks"):
+        write_adapter_manifest(str(root))
+
+
+def test_cpt_and_preference_reject_non_object_rows(tmp_path):
+    corpus=tmp_path/"corpus.jsonl"; corpus.write_text("[]\n",encoding="utf-8")
+    with pytest.raises(ValueError,match="JSON object"):
+        load_cpt_corpus(str(corpus),["cc0-1.0"])
+    with pytest.raises(ValueError,match="JSON object"):
+        validate_preference_pairs([[]])
