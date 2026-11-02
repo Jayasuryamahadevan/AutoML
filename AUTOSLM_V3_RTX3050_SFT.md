@@ -15,7 +15,7 @@ This milestone implements a resumable-friendly, validation-selected QLoRA SFT ru
 - LoRA rank: 8, alpha: 16.
 - Gradient checkpointing.
 - Paged 8-bit AdamW.
-- Evaluation and checkpoint save every 25 steps; best checkpoint selected by validation loss.
+- Evaluation and checkpoint save each epoch; best checkpoint selected by validation loss.
 - Locked test evaluated after best-checkpoint restoration and never used for training decisions.
 
 These are initial conservative settings, not a guarantee of fit. Windows background GPU use, model loading overhead, Transformers versions and CUDA/bitsandbytes builds change memory use. If CUDA OOM occurs, reduce sequence length to 384 or 256 first, then use a smaller compatible base model. Do not silently reduce test coverage or remove evaluation.
@@ -61,6 +61,7 @@ Artifacts are written under `outputs/autoslm_v3/<run-id>/`:
 - `adapter/`: PEFT adapter and tokenizer
 - `experiment_manifest.json`: model/config/data/runtime metadata
 - `lineage.sqlite3`: hash-chained run events
+- `locked_test_predictions.jsonl`: greedy-generation predictions with exact-match and token-F1 metrics (lexical proxies, not semantic certification)
 - `result.json`: training, validation and locked-test metrics
 
 ## Verification gates
