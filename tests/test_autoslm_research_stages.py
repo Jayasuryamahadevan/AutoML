@@ -95,7 +95,7 @@ def test_cpt_chunker_keeps_short_final_blocks():
 
 def test_benchmark_rejects_non_object_and_output_overwrite(tmp_path):
     bad=tmp_path/"bad.jsonl"
-    bad.write_text("[]"+"\\n"+"\\n".join(json.dumps({"id":str(i),"task":"qa","prompt":"p","reference":"r","source":"review","license":"consent","split":"test"}) for i in range(10)),encoding="utf-8")
+    bad.write_text("[]"+"\n"+"\n".join(json.dumps({"id":str(i),"task":"qa","prompt":"p","reference":"r","source":"review","license":"consent","split":"test"}) for i in range(10)),encoding="utf-8")
     with pytest.raises(ValueError,match="JSON object"):
         load_locked_benchmark(str(bad))
     good=tmp_path/"good.jsonl"; _benchmark(good)
