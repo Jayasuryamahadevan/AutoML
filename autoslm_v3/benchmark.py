@@ -28,7 +28,9 @@ def load_locked_benchmark(path: str) -> List[Dict[str, Any]]:
             if not line.strip(): continue
             try: row=json.loads(line)
             except json.JSONDecodeError as exc: raise ValueError(f"invalid benchmark JSON on line {n}") from exc
-            missing=[key for key in REQUIRED if not str(row.get(key,"")).strip()]
+            if not isinstance(row, dict):
+                raise ValueError(f"benchmark line {n} must be a JSON object")
+            missing=[key for key in REQUIRED if not isinstance(row.get(key), str) or not row[key].strip()]
             if missing: raise ValueError(f"benchmark line {n} missing: {', '.join(missing)}")
             if row["split"] != "test": raise ValueError(f"benchmark line {n} must be marked split=test")
             rows.append(row)
@@ -51,8 +53,11 @@ def _f1(pred: str, ref: str) -> float:
 
 def evaluate_callable(model_id: str, predictor: Callable[[str], str],
                       benchmark_path: str, output_path: str) -> BenchmarkReport:
+    if Path(benchmark_path).resolve() == Path(output_path).resolve():
+        raise ValueError("predictions output must not overwrite the locked benchmark")
     rows=load_locked_benchmark(benchmark_path)
-    fingerprint=hashlib.sha256("".join(sorted(hashlib.sha256(json.dumps(x,sort_keys=True).encode()).hexdigest() for x in rows)).encode()).hexdigest()
+    canonical="".join(json.dumps(x,sort_keys=True,separators=(",",":"),ensure_ascii=False) for x in rows)
+    fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     results=[]; tasks={}
     for row in rows:
         prediction=str(predictor(str(row["prompt"])))
@@ -76,6 +81,8 @@ def compare_reports(baseline: BenchmarkReport, candidate: BenchmarkReport) -> Di
         raise ValueError("base and candidate must use the identical locked benchmark")
     if baseline.sample_count != candidate.sample_count:
         raise ValueError("base and candidate sample counts differ")
+    if baseline.per_task.keys() != candidate.per_task.keys():
+        raise ValueError("base and candidate task coverage differs")
     return {"benchmark_fingerprint":baseline.fingerprint,
             "baseline_model":baseline.benchmark_id,"candidate_model":candidate.benchmark_id,
             "exact_match_delta":candidate.exact_match-baseline.exact_match,
