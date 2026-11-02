@@ -71,7 +71,12 @@ def run_cpt(domain_path: str, replay_path: str, config: SFTConfig,
     model=AutoModelForCausalLM.from_pretrained(config.model_name_or_path,quantization_config=q,device_map={"":0},torch_dtype=torch.float16,trust_remote_code=config.trust_remote_code)
     model=prepare_model_for_kbit_training(model,use_gradient_checkpointing=True); model.config.use_cache=False
     model=get_peft_model(model,LoraConfig(r=config.lora_rank,lora_alpha=config.lora_alpha,lora_dropout=config.lora_dropout,bias="none",task_type="CAUSAL_LM",target_modules=list(config.target_modules)))
-    train_ds=Dataset.from_list(chunk_texts(train,tokenizer,block_size)); val_ds=Dataset.from_list(chunk_texts(val,tokenizer,block_size)); test_ds=Dataset.from_list(chunk_texts(test,tokenizer,block_size))
+    train_blocks=chunk_texts(train,tokenizer,block_size)
+    val_blocks=chunk_texts(val,tokenizer,block_size)
+    test_blocks=chunk_texts(test,tokenizer,block_size)
+    if not train_blocks or not val_blocks or not test_blocks:
+        raise ValueError("CPT source-level split must produce non-empty train, validation and test token blocks; add more source documents or shorten block_size")
+    train_ds=Dataset.from_list(train_blocks); val_ds=Dataset.from_list(val_blocks); test_ds=Dataset.from_list(test_blocks)
     out=Path(config.output_dir)/run_id; out.mkdir(parents=True,exist_ok=False)
     lineage=LineageStore(str(out/"lineage.sqlite3")); lineage.append(run_id,"cpt_started",{"domain_documents":len(domain),"replay_documents":len(replay),"replay_fraction":replay_fraction,"train_blocks":len(train_ds),"validation_blocks":len(val_ds),"test_blocks":len(test_ds)})
     args=TrainingArguments(output_dir=str(out/"checkpoints"),per_device_train_batch_size=1,per_device_eval_batch_size=1,gradient_accumulation_steps=config.gradient_accumulation_steps,learning_rate=config.learning_rate,num_train_epochs=config.num_train_epochs,logging_steps=config.logging_steps,evaluation_strategy="epoch",save_strategy="epoch",load_best_model_at_end=True,metric_for_best_model="eval_loss",greater_is_better=False,save_total_limit=2,fp16=True,gradient_checkpointing=True,optim="paged_adamw_8bit",report_to="none",remove_unused_columns=False,seed=config.seed)
