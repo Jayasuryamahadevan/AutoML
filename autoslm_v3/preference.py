@@ -98,7 +98,8 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
                     ref_rejected=_sequence_logps(model,inputs["rejected_ids"],inputs["rejected_mask"],inputs["rejected_labels"])
             loss=dpo_loss(chosen,rejected,ref_chosen,ref_rejected,beta)
             if return_outputs:
-                return loss, {"loss": loss.detach()}
+                preference_logits = torch.stack((chosen.detach(), rejected.detach()), dim=-1)
+                return loss, {"logits": preference_logits}
             return loss
     out=Path(config.output_dir)/run_id; out.mkdir(parents=True,exist_ok=False)
     lineage=LineageStore(str(out/"lineage.sqlite3")); lineage.append(run_id,"dpo_started",{"pairs":len(rows),"beta":beta,"train":len(train),"validation":len(val),"test":len(test)})
