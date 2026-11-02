@@ -77,10 +77,31 @@ def split_dataset(
     if len(unique) < 3:
         raise ValueError("at least three unique, non-empty examples are required")
 
+    # Connected components enforce both document-level grouping and prompt-level
+    # grouping. A prompt can connect records from multiple source groups.
+    parent = {}
+
+    def find(node):
+        parent.setdefault(node, node)
+        if parent[node] != node:
+            parent[node] = find(parent[node])
+        return parent[node]
+
+    def union(left, right):
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for index, row in enumerate(unique):
+        document_node = "document:" + str(row.get("group_id") or "row:" + str(index))
+        prompt_node = "prompt:" + str(row["_autoslm_prompt_hash"])
+        union(document_node, prompt_node)
+
     groups = {}
     for index, row in enumerate(unique):
-        group = str(row.get("group_id") or row["_autoslm_prompt_hash"] or index)
-        groups.setdefault(group, []).append(row)
+        document_node = "document:" + str(row.get("group_id") or "row:" + str(index))
+        root = find(document_node)
+        groups.setdefault(root, []).append(row)
 
     keys = list(groups)
     random.Random(seed).shuffle(keys)
