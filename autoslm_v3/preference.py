@@ -66,7 +66,9 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             for name,text in (("chosen",row["chosen"]),("rejected",row["rejected"])):
                 answer=tokenizer(text+(tokenizer.eos_token or ""),add_special_tokens=False)["input_ids"][:config.max_seq_length]
                 p=prompt_ids[-max(0,config.max_seq_length-len(answer)):] if len(answer)<config.max_seq_length else []
-                ids=p+answer; if not answer: raise ValueError(f"preference row has empty tokenized {name} response")
+                if not answer:
+                    raise ValueError(f"preference row has empty tokenized {name} response")
+                ids=p+answer
                 item[name+"_ids"]=ids; item[name+"_labels"]=[-100]*len(p)+answer
             output.append(item)
         return output
