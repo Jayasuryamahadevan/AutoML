@@ -35,6 +35,9 @@ class ModelRegistry:
         verification=verify_adapter_manifest(str(path))
         if not verification["valid"]: raise ValueError(f"adapter integrity verification failed: {verification}")
         manifest=json.loads((path/"artifact_manifest.json").read_text(encoding="utf-8"))
+        manifest_dataset=manifest.get("metadata",{}).get("dataset_fingerprint")
+        if manifest_dataset and manifest_dataset != dataset_fingerprint:
+            raise ValueError("dataset_fingerprint does not match the adapter artifact manifest")
         artifact_fingerprint=hashlib.sha256(json.dumps(manifest,sort_keys=True,separators=(",",":")).encode()).hexdigest()
         version_id=str(uuid.uuid4())
         with self._connect() as db:
