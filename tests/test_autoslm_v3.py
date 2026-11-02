@@ -2,7 +2,7 @@ import pytest
 
 from autoslm_v3.data import split_dataset
 from autoslm_v3.evaluation import EvaluationSummary, compare_and_promote
-from autoslm_v3.planning import ProjectSpec, Stage, build_training_plan
+from autoslm_v3.planning import PlannerPolicy, ProjectSpec, Stage, build_training_plan
 
 
 def examples(n=30):
@@ -45,6 +45,14 @@ def test_plan_skips_expensive_stages_without_evidence():
     assert Stage.EVALUATE in enabled
 
 
+def test_planner_thresholds_are_configurable():
+    plan = build_training_plan(
+        ProjectSpec(task="domain model", raw_domain_tokens=500, target_domain_shift="high"),
+        PlannerPolicy(midtraining_min_raw_tokens=500),
+    )
+    assert next(d for d in plan.stages if d.stage == Stage.MIDTRAIN).enabled
+
+
 def test_midtraining_requires_corpus_and_domain_shift():
     plan = build_training_plan(ProjectSpec(
         task="legal domain model", raw_domain_tokens=20_000_000,
@@ -65,3 +73,9 @@ def test_small_evaluation_set_is_rejected():
     base = EvaluationSummary("base", {"accuracy": .7}, {}, True, sample_count=0)
     with pytest.raises(ValueError):
         compare_and_promote(base, base, "accuracy")
+
+
+def test_non_normalized_metrics_are_rejected():
+    invalid = EvaluationSummary("bad", {"accuracy": 87.0}, {}, True, sample_count=10)
+    with pytest.raises(ValueError):
+        compare_and_promote(invalid, invalid, "accuracy")
