@@ -13,9 +13,18 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def content_hash(example: Dict[str, object]) -> str:
     canonical = normalize_text(str(example.get("instruction", ""))) + "\n" + normalize_text(str(example.get("response", "")))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return _digest(canonical)
+
+
+def prompt_hash(example: Dict[str, object]) -> str:
+    """Hash the input independently so repeated prompts cannot cross splits."""
+    return _digest(normalize_text(str(example.get("instruction", ""))))
 
 
 @dataclass
@@ -43,7 +52,7 @@ def split_dataset(
     validation_fraction: float = 0.1,
     seed: int = 42,
 ) -> DatasetSplit:
-    """Deduplicate, then split deterministically; group_id stays in one split."""
+    """Deduplicate, then split deterministically; group_id and repeated prompts stay together."""
     if not 0 < test_fraction < 1 or not 0 < validation_fraction < 1:
         raise ValueError("split fractions must be between 0 and 1")
     if test_fraction + validation_fraction >= 1:
@@ -51,15 +60,18 @@ def split_dataset(
 
     unique: List[Dict[str, object]] = []
     seen = set()
+    duplicates_removed = 0
     for raw in examples:
         row = dict(raw)
         if not str(row.get("instruction", "")).strip() or not str(row.get("response", "")).strip():
             continue
         digest = content_hash(row)
         if digest in seen:
+            duplicates_removed += 1
             continue
         seen.add(digest)
         row["_autoslm_content_hash"] = digest
+        row["_autoslm_prompt_hash"] = prompt_hash(row)
         unique.append(row)
 
     if len(unique) < 3:
@@ -67,7 +79,7 @@ def split_dataset(
 
     groups = {}
     for index, row in enumerate(unique):
-        group = str(row.get("group_id") or row["_autoslm_content_hash"] or index)
+        group = str(row.get("group_id") or row["_autoslm_prompt_hash"] or index)
         groups.setdefault(group, []).append(row)
 
     keys = list(groups)
@@ -92,10 +104,16 @@ def split_dataset(
         {str(row["_autoslm_content_hash"]) for row in part}
         for part in (train, validation, test)
     ]
-    if (partition_hashes[0] & partition_hashes[1]
-            or partition_hashes[0] & partition_hashes[2]
-            or partition_hashes[1] & partition_hashes[2]):
-        raise RuntimeError("internal error: content leakage across partitions")
+    prompt_hashes = [
+        {str(row["_autoslm_prompt_hash"]) for row in part}
+        for part in (train, validation, test)
+    ]
+    if any(
+        partition_hashes[i] & partition_hashes[j]
+        or prompt_hashes[i] & prompt_hashes[j]
+        for i, j in ((0, 1), (0, 2), (1, 2))
+    ):
+        raise RuntimeError("internal error: content or prompt leakage across partitions")
 
-    fingerprint = hashlib.sha256("".join(sorted(seen)).encode("ascii")).hexdigest()
-    return DatasetSplit(train, validation, test, len(examples) - len(unique), fingerprint)
+    fingerprint = _digest("".join(sorted(seen)))
+    return DatasetSplit(train, validation, test, duplicates_removed, fingerprint)
