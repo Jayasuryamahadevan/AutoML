@@ -22,7 +22,7 @@ def validate_preference_pairs(rows: Iterable[Dict[str,Any]]) -> List[Dict[str,st
         if chosen==rejected: raise ValueError(f"preference row {n} has identical chosen/rejected")
         if not row.get("source") or not row.get("license"): raise ValueError(f"preference row {n} requires source and license provenance")
         key=(prompt,chosen,rejected)
-        if key not in seen: seen.add(key); result.append({"prompt":prompt,"chosen":chosen,"rejected":rejected,"source":str(row["source"]),"license":str(row["license"])})
+        if key not in seen: seen.add(key); result.append({"prompt":prompt,"chosen":chosen,"rejected":rejected,"source":str(row["source"]),"license":str(row["license"]),"source_document_id":str(row.get("source_document_id","")).strip()})
     if not result: raise ValueError("no valid preference pairs")
     return result
 
@@ -50,8 +50,23 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             raw.append(row)
     rows=validate_preference_pairs(raw)
     if len(rows)<10: raise ValueError("DPO requires at least 10 reviewed preference pairs")
+    # Keep repeated prompts and examples from the same source document together.
+    parent={}
+    def find(key):
+        parent.setdefault(key,key)
+        if parent[key]!=key: parent[key]=find(parent[key])
+        return parent[key]
+    def union(a,b):
+        ra,rb=find(a),find(b)
+        if ra!=rb: parent[rb]=ra
+    for row in rows:
+        prompt_key="prompt:"+row["prompt"]
+        source_id=row.get("source_document_id")
+        if source_id: union(prompt_key,"source:"+source_id)
     groups={}
-    for row in rows: groups.setdefault(row["prompt"],[]).append(row)
+    for row in rows:
+        group_key=find("prompt:"+row["prompt"])
+        groups.setdefault(group_key,[]).append(row)
     keys=list(groups)
     if len(keys)<3:
         raise ValueError("DPO requires at least three distinct prompts to create train, validation and test partitions")
