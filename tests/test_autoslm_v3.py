@@ -29,8 +29,8 @@ def test_duplicate_rows_are_removed():
 def test_repeated_prompt_with_different_answers_stays_in_one_partition():
     rows = examples()
     rows.extend([
-        {"instruction": "same question", "response": "answer A"},
-        {"instruction": "same question", "response": "answer B"},
+        {"instruction": "same question", "response": "answer A", "group_id": "source-A"},
+        {"instruction": "same question", "response": "answer B", "group_id": "source-B"},
     ])
     split = split_dataset(rows)
     owners = set()
