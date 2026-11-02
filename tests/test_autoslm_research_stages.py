@@ -5,7 +5,7 @@ import pytest
 from autoslm_v3.artifacts import write_adapter_manifest, verify_adapter_manifest
 from autoslm_v3.benchmark import load_locked_benchmark, evaluate_callable, compare_reports
 from autoslm_v3.cpt import mix_domain_and_replay, load_cpt_corpus
-from autoslm_v3.preference import validate_preference_pairs
+from autoslm_v3.preference import validate_preference_pairs, group_preference_pairs
 
 
 def test_adapter_manifest_detects_tampering(tmp_path):
@@ -141,3 +141,13 @@ def test_cpt_and_preference_reject_non_object_rows(tmp_path):
         load_cpt_corpus(str(corpus),["cc0-1.0"])
     with pytest.raises(ValueError,match="JSON object"):
         validate_preference_pairs([[]])
+
+ 
+def test_dpo_grouping_connects_prompts_from_same_source_document():
+    rows=[
+        {"prompt":"prompt A","chosen":"yes","rejected":"no","source":"review","license":"consent","source_document_id":"doc-1"},
+        {"prompt":"prompt B","chosen":"yes","rejected":"no","source":"review","license":"consent","source_document_id":"doc-1"},
+        {"prompt":"prompt C","chosen":"yes","rejected":"no","source":"review","license":"consent","source_document_id":"doc-2"},
+    ]
+    groups=group_preference_pairs(rows)
+    assert sorted(len(group) for group in groups.values())==[1,2]
