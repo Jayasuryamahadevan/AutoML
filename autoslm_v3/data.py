@@ -27,6 +27,20 @@ def prompt_hash(example: Dict[str, object]) -> str:
     return _digest(normalize_text(str(example.get("instruction", ""))))
 
 
+def source_group_id(example: Dict[str, object], fallback: str) -> str:
+    """Resolve stable source-document identity from flat or nested provenance."""
+    provenance = example.get("provenance")
+    provenance = provenance if isinstance(provenance, dict) else {}
+    value = (
+        example.get("group_id")
+        or example.get("source_document_id")
+        or example.get("document_id")
+        or provenance.get("source_document_id")
+        or provenance.get("document_id")
+    )
+    return str(value) if value else fallback
+
+
 @dataclass
 class DatasetSplit:
     train: List[Dict[str, object]]
@@ -93,7 +107,7 @@ def split_dataset(
             parent[root_right] = root_left
 
     for index, row in enumerate(unique):
-        document_node = "document:" + str(row.get("group_id") or "row:" + str(index))
+        document_node = "document:" + source_group_id(row, "row:" + str(index))
         prompt_node = "prompt:" + str(row["_autoslm_prompt_hash"])
         union(document_node, prompt_node)
 
