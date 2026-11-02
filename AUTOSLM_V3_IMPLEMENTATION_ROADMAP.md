@@ -10,7 +10,7 @@ This roadmap is intentionally gated by measurable acceptance criteria. A stage i
 - [x] Baseline-relative promotion gate.
 - [x] Experiment manifest with config and dataset fingerprints.
 - [x] Initial unit tests.
-- [ ] CI result green on GitHub Actions.
+- [x] CI result green on GitHub Actions (39 CPU-only tests; no GPU training).
 - [x] Integrate group-aware train/validation/holdout partitioning into the legacy workflow; retries now use validation and the held-out set is evaluated once.
 - [ ] Replace synthetic-only holdout with an externally curated, human-reviewed locked benchmark.
 - [ ] Split source documents/tasks before synthetic augmentation when source corpora are available.
@@ -19,7 +19,7 @@ This roadmap is intentionally gated by measurable acceptance criteria. A stage i
 ## Milestone 1 — Data engine
 
 Deliverables:
-- Source adapters for local files, Hugging Face datasets and approved APIs.
+- [ ] Source adapters for local files, Hugging Face datasets and approved APIs.
 - Schema validation, language detection, PII policy hooks, license allowlist and provenance.
 - Exact and near-duplicate detection; document/entity-level splitting.
 - Quality scoring calibrated against human-reviewed examples.
@@ -108,3 +108,26 @@ Acceptance:
 The first complete v3 release should support: select an instruct base model -> baseline evaluation -> leakage-safe dataset preparation -> QLoRA SFT -> validation-based checkpoint selection -> locked test comparison -> adapter export -> reproducible model card.
 
 Do not implement pretraining first. A reliable SFT path and trustworthy evaluation are the highest-value foundation for the current project's scale and hardware.
+
+
+## Status update — 2026-11-02
+
+The following code deliverables have since landed on this branch:
+- [x] SFT QLoRA Trainer + PEFT path with response-only masking, validation-selected checkpointing, resume support and held-out evaluation.
+- [x] Base-model generation baseline on the same SFT holdout.
+- [x] Peak CUDA allocated/reserved memory capture in SFT results (must be populated by a real GPU run).
+- [x] Adapter SHA-256 inventory and tamper verification.
+- [x] Independent benchmark schema, provenance requirements, per-task metrics and identical-fingerprint base/candidate comparison.
+- [x] Experimental CPT QLoRA runner with license allowlist, source grouping and general replay mixture.
+- [x] Experimental DPO QLoRA runner with prompt-level grouping, license allowlist and frozen reference policy via adapter disabling.
+- [x] CLI entrypoints and CPU contract tests for new stages.
+
+Still open:
+- [ ] Execute SFT, CPT and DPO on the target RTX 3050 and verify real CUDA/bitsandbytes behavior, memory, throughput and resume.
+- [ ] Create a genuinely human-reviewed locked benchmark and run base/SFT/CPT/DPO comparisons.
+- [ ] Add task-specific semantic, factuality, safety and human-preference evaluation.
+- [ ] Validate DPO against the exact pinned Transformers/PEFT/bitsandbytes versions; its CPU CI coverage does not execute the loss/trainer.
+- [ ] Split source corpora before synthetic augmentation and enforce test-set access boundaries.
+- [ ] Add hardware/model compatibility profiling, persistent dataset/model registries, artifact signing, model merging/GGUF/Ollama release, distributed training and reward-verified GRPO.
+
+Do not mark a milestone complete until its acceptance criteria are demonstrated with real runs and retained reports.
