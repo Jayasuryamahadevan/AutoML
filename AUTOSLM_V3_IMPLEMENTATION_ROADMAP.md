@@ -131,3 +131,13 @@ Still open:
 - [ ] Add hardware/model compatibility profiling, persistent dataset/model registries, artifact signing, model merging/GGUF/Ollama release, distributed training and reward-verified GRPO.
 
 Do not mark a milestone complete until its acceptance criteria are demonstrated with real runs and retained reports.
+
+
+### Additional implementation update — 2026-11-02
+- [x] Local SQLite adapter registry with artifact verification, immutable version IDs, audit events and alias resolution.
+- [x] Evidence-gated promotion requires a locked benchmark fingerprint, safety pass, human review and zero task regressions.
+- [x] CLI for register/promote/reject/list/resolve.
+- [x] GPU preflight script (non-download default; optional explicit NF4 load/generation smoke test).
+- [x] Benchmark report comparison CLI.
+- [x] Preserve system/user roles for supported single-turn conversational SFT examples.
+- [x] Source-document grouping now reads nested provenance metadata in SFT and DPO splits.
