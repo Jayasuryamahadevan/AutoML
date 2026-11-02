@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import random
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -17,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from .data import split_dataset
 from .lineage import LineageStore
-from .manifest import build_experiment_manifest, sha256_json
+from .manifest import build_experiment_manifest
 
 
 @dataclass(frozen=True)
