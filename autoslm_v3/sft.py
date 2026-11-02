@@ -99,6 +99,8 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 def _extract_prompt_answer(row: Dict[str, Any]):
     if isinstance(row.get("messages"), list):
         messages = row["messages"]
+        if not messages:
+            raise ValueError("messages format cannot be empty")
         if not all(isinstance(m, dict) and m.get("role") in {"system", "user", "assistant"} for m in messages):
             raise ValueError("messages format supports only system, user and assistant roles")
         if messages[-1].get("role") != "assistant" or not any(m.get("role") == "user" for m in messages):
