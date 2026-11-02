@@ -106,3 +106,21 @@ python scripts/model_registry.py list
 ```
 
 Promotion is intentionally fail-closed when safety or human review is absent or task regressions exist. The registry stores the evidence submitted by the operator; it does not independently prove that a reviewer performed the review or that the benchmark is valid. Protect the SQLite database and evidence files accordingly.
+
+
+## GGUF export and local Ollama import
+
+Install/build llama.cpp separately and make sure its Python converter and `llama-quantize` binary exist. The export explicitly merges the adapter into the base model in full precision, then converts and quantizes. This needs substantial temporary disk space and system RAM; it is not a 4-GB-VRAM guarantee.
+
+```bash
+python scripts/export_gguf.py --base-model Qwen/Qwen2.5-0.5B-Instruct --adapter outputs/autoslm_v3/RUN_ID/adapter --output-dir outputs/gguf/RUN_ID --llama-cpp-dir ~/llama.cpp --quantization Q4_K_M
+```
+
+For an already-created GGUF file, import it into the local Ollama installation:
+
+```bash
+python scripts/deploy_ollama.py --gguf outputs/gguf/RUN_ID/model-q4_k_m.gguf --name autoslm-domain:latest --context-length 2048
+ollama run autoslm-domain:latest
+```
+
+These commands are opt-in and local-only. They were not executed in CPU CI. Verify the exported model against the same locked benchmark after import; successful conversion/import is not a quality or safety result.
