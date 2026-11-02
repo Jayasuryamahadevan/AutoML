@@ -72,3 +72,12 @@ def test_preference_pairs_require_provenance_and_distinct_answers():
         validate_preference_pairs([{**good,"rejected":"good"}])
     with pytest.raises(ValueError,match="provenance"):
         validate_preference_pairs([{k:v for k,v in good.items() if k!="source"}])
+
+
+def test_new_stage_cli_help_is_cpu_safe():
+    import subprocess, sys
+    root=Path(__file__).resolve().parents[1]
+    for name,expected in (("train_cpt.py","--domain-corpus"),("train_dpo.py","--allowed-licenses"),("evaluate_benchmark.py","--benchmark")):
+        result=subprocess.run([sys.executable,str(root/"scripts"/name),"--help"],cwd=root,capture_output=True,text=True)
+        assert result.returncode==0,result.stderr
+        assert expected in result.stdout
