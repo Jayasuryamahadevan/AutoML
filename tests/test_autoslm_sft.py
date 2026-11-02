@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -79,3 +82,14 @@ def test_token_f1_is_bounded_and_exact_match_is_one():
     assert _token_f1("the quick fox", "the quick fox") == 1.0
     assert 0.0 < _token_f1("the quick fox", "the slow fox") < 1.0
     assert _token_f1("abc", "xyz") == 0.0
+
+
+def test_repository_cli_help_runs_without_ml_runtime(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts" / "train_sft.py"), "--help"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--dataset" in result.stdout
+    assert "--resume-from-checkpoint" in result.stdout
