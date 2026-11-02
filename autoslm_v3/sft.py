@@ -47,6 +47,8 @@ class SFTConfig:
     use_4bit: bool = True
     gradient_checkpointing: bool = True
     allow_cpu: bool = False
+    max_new_tokens: int = 128
+    max_eval_samples: int = 100
 
     def validate(self) -> None:
         if not self.model_name_or_path.strip():
@@ -65,6 +67,8 @@ class SFTConfig:
             raise ValueError("learning_rate and num_train_epochs must be positive")
         if self.eval_steps < 1 or self.save_steps < 1:
             raise ValueError("eval_steps and save_steps must be positive")
+        if self.max_new_tokens < 1 or self.max_eval_samples < 1:
+            raise ValueError("max_new_tokens and max_eval_samples must be positive")
         if not self.target_modules:
             raise ValueError("at least one LoRA target module is required")
 
@@ -189,7 +193,68 @@ class _CausalCollator:
         return {key: torch.tensor(value, dtype=torch.long) for key, value in batch.items()}
 
 
-def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None) -> Dict[str, Any]:
+
+def _normalized_answer(text: str) -> str:
+    import re
+    return re.sub(r"\\s+", " ", text.casefold()).strip()
+
+
+def _token_f1(prediction: str, reference: str) -> float:
+    from collections import Counter
+    pred = _normalized_answer(prediction).split()
+    ref = _normalized_answer(reference).split()
+    if not pred or not ref:
+        return float(pred == ref)
+    overlap = sum((Counter(pred) & Counter(ref)).values())
+    if overlap == 0:
+        return 0.0
+    precision, recall = overlap / len(pred), overlap / len(ref)
+    return 2 * precision * recall / (precision + recall)
+
+
+def evaluate_generation(model, tokenizer, rows, max_input_length: int,
+                        max_new_tokens: int, max_samples: int):
+    """Deterministic greedy generation metrics on the locked holdout."""
+    import torch
+    model.eval()
+    selected = rows[:max_samples]
+    exact, f1, predictions = [], [], []
+    for row in selected:
+        prompt = _format_prompt(tokenizer, str(row["instruction"]))
+        encoded = tokenizer(prompt, return_tensors="pt", truncation=True,
+                            max_length=max_input_length, add_special_tokens=False)
+        device = next(model.parameters()).device
+        encoded = {key: value.to(device) for key, value in encoded.items()}
+        with torch.inference_mode():
+            generated = model.generate(
+                **encoded, max_new_tokens=max_new_tokens, do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=True,
+            )
+        continuation = generated[0, encoded["input_ids"].shape[1]:]
+        prediction = tokenizer.decode(continuation, skip_special_tokens=True).strip()
+        reference = str(row["response"]).strip()
+        exact_score = float(_normalized_answer(prediction) == _normalized_answer(reference))
+        f1_score = _token_f1(prediction, reference)
+        exact.append(exact_score)
+        f1.append(f1_score)
+        predictions.append({
+            "instruction": str(row["instruction"]),
+            "reference": reference,
+            "prediction": prediction,
+            "exact_match": exact_score,
+            "token_f1": f1_score,
+        })
+    return {
+        "sample_count": len(selected),
+        "exact_match": sum(exact) / max(1, len(exact)),
+        "token_f1": sum(f1) / max(1, len(f1)),
+        "metric_note": "Greedy-generation lexical metrics; not a semantic or safety certification.",
+    }, predictions
+
+
+def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, resume_from_checkpoint: Optional[str] = None) -> Dict[str, Any]:
     """Train LoRA adapter, select by validation loss, then evaluate locked test once."""
     config.validate()
     torch, Dataset, LoraConfig, get_peft_model, prepare_model_for_kbit_training, \
@@ -204,7 +269,7 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None) 
             raise RuntimeError("Detected less than 3.5 GiB total VRAM; this preset requires a 4 GB-class GPU.")
     run_id = run_id or str(uuid.uuid4())
     output_dir = Path(config.output_dir) / run_id
-    output_dir.mkdir(parents=True, exist_ok=False)
+    output_dir.mkdir(parents=True, exist_ok=bool(resume_from_checkpoint))
     lineage = LineageStore(str(output_dir / "lineage.sqlite3"))
     started = time.time()
     lineage.append(run_id, "run_started", {"dataset_path": str(Path(dataset_path).resolve()), "config": asdict(config)})
@@ -279,8 +344,8 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None) 
             learning_rate=config.learning_rate, num_train_epochs=config.num_train_epochs,
             max_steps=config.max_steps, warmup_ratio=config.warmup_ratio,
             logging_steps=config.logging_steps, eval_steps=config.eval_steps,
-            save_steps=config.save_steps, evaluation_strategy="steps",
-            save_strategy="steps", load_best_model_at_end=True,
+            save_steps=config.save_steps, evaluation_strategy="epoch",
+            save_strategy="epoch", load_best_model_at_end=True,
             metric_for_best_model="eval_loss", greater_is_better=False,
             save_total_limit=2, fp16=torch.cuda.is_available(), bf16=False,
             gradient_checkpointing=config.gradient_checkpointing,
@@ -294,10 +359,18 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None) 
             eval_dataset=validation_ds, data_collator=_CausalCollator(tokenizer),
         )
         lineage.append(run_id, "training_started", {"trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad)})
-        train_result = trainer.train()
+        train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         validation_metrics = trainer.evaluate(eval_dataset=validation_ds, metric_key_prefix="validation")
         # The selected checkpoint is loaded by Trainer before this final test read.
         test_metrics = trainer.evaluate(eval_dataset=test_ds, metric_key_prefix="locked_test")
+        generation_metrics, predictions = evaluate_generation(
+            trainer.model, tokenizer, split.test, config.max_seq_length,
+            config.max_new_tokens, config.max_eval_samples,
+        )
+        (output_dir / "locked_test_predictions.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\\n" for item in predictions),
+            encoding="utf-8",
+        )
         adapter_dir = output_dir / "adapter"
         trainer.model.save_pretrained(adapter_dir)
         tokenizer.save_pretrained(adapter_dir)
@@ -307,6 +380,7 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None) 
             "train_metrics": train_result.metrics,
             "validation_metrics": validation_metrics,
             "locked_test_metrics": test_metrics,
+            "locked_test_generation_metrics": generation_metrics,
             "dataset_fingerprint": split.fingerprint,
             "duration_seconds": round(time.time() - started, 2),
             "manifest_path": str(output_dir / "experiment_manifest.json"),
@@ -333,8 +407,9 @@ def main(argv=None):
     parser.add_argument("--dataset", required=True, help="JSONL with instruction/response or prompt/completion")
     parser.add_argument("--config", required=True, help="JSON SFT config")
     parser.add_argument("--run-id")
+    parser.add_argument("--resume-from-checkpoint")
     args = parser.parse_args(argv)
-    result = run_sft(args.dataset, config_from_json(args.config), args.run_id)
+    result = run_sft(args.dataset, config_from_json(args.config), args.run_id, args.resume_from_checkpoint)
     print(json.dumps(result, indent=2, default=str))
 
 
