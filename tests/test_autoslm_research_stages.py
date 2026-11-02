@@ -6,6 +6,7 @@ from autoslm_v3.artifacts import write_adapter_manifest, verify_adapter_manifest
 from autoslm_v3.benchmark import load_locked_benchmark, evaluate_callable, compare_reports
 from autoslm_v3.cpt import mix_domain_and_replay, load_cpt_corpus
 from autoslm_v3.preference import validate_preference_pairs, group_preference_pairs
+from autoslm_v3.registry import ModelRegistry
 
 
 def test_adapter_manifest_detects_tampering(tmp_path):
@@ -151,3 +152,31 @@ def test_dpo_grouping_connects_prompts_from_same_source_document():
     ]
     groups=group_preference_pairs(rows)
     assert sorted(len(group) for group in groups.values())==[1,2]
+
+ 
+def test_model_registry_requires_evidence_and_resolves_promoted_alias(tmp_path):
+    adapter=tmp_path/"adapter"; adapter.mkdir()
+    (adapter/"adapter_config.json").write_text('{"r":8}',encoding="utf-8")
+    write_adapter_manifest(str(adapter),{"dataset_fingerprint":"dataset-abc"})
+    registry=ModelRegistry(str(tmp_path/"registry.sqlite3"))
+    version=registry.register("run-1","tiny-model","sft",str(adapter),"dataset-abc")
+    assert version["status"]=="candidate"
+    with pytest.raises(ValueError,match="promotion evidence missing"):
+        registry.promote(version["version_id"],"production",{})
+    evidence={"benchmark_fingerprint":"locked-123","safety_passed":True,"human_review_passed":True,"task_regressions":[]}
+    promoted=registry.promote(version["version_id"],"production",evidence)
+    assert promoted["status"]=="promoted"
+    assert registry.resolve("production")["version_id"]==version["version_id"]
+
+
+def test_model_registry_blocks_unsafe_promotion_and_fingerprint_mismatch(tmp_path):
+    adapter=tmp_path/"adapter"; adapter.mkdir()
+    (adapter/"adapter_config.json").write_text('{"r":8}',encoding="utf-8")
+    write_adapter_manifest(str(adapter),{"dataset_fingerprint":"dataset-abc"})
+    registry=ModelRegistry(str(tmp_path/"registry.sqlite3"))
+    with pytest.raises(ValueError,match="does not match"):
+        registry.register("run-1","tiny-model","sft",str(adapter),"wrong-fingerprint")
+    version=registry.register("run-1","tiny-model","sft",str(adapter),"dataset-abc")
+    evidence={"benchmark_fingerprint":"locked-123","safety_passed":False,"human_review_passed":True,"task_regressions":[]}
+    with pytest.raises(ValueError,match="safety"):
+        registry.promote(version["version_id"],"production",evidence)
