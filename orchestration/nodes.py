@@ -43,7 +43,7 @@ def dataset_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     dataset_path = Path('data/datasets') / f"{state['job_id']}_train.jsonl"
-    validation_path = Path('data/validation_sets') / f"{state['job_id']}_validation.jsonl"
+    validation_path = Path('data/validation_sets') / f"{state['job_id']}_validation.json"
     test_path = Path('data/test_sets') / f"{state['job_id']}_test.json"
     for path in (dataset_path, validation_path, test_path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,18 +59,23 @@ def dataset_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
 
     write_training_jsonl(dataset_path, split.train)
-    write_training_jsonl(validation_path, split.validation)
 
-    # Strip internal split hashes from the held-out test artifact.
-    test_data = [
-        {
-            "instruction": example["instruction"],
-            "response": example["response"],
-            "category": example.get("category"),
-            "metadata": example.get("metadata") or {},
-        }
-        for example in split.test
-    ]
+    # Keep validation and test as separate, non-training JSON artifacts.
+    def public_examples(rows):
+        return [
+            {
+                "instruction": example["instruction"],
+                "response": example["response"],
+                "category": example.get("category"),
+                "metadata": example.get("metadata") or {},
+            }
+            for example in rows
+        ]
+
+    validation_data = public_examples(split.validation)
+    test_data = public_examples(split.test)
+    with validation_path.open("w", encoding="utf-8") as stream:
+        json.dump(validation_data, stream, ensure_ascii=False, indent=2)
     with test_path.open("w", encoding="utf-8") as stream:
         json.dump(test_data, stream, ensure_ascii=False, indent=2)
 
@@ -154,8 +159,12 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
     with open('config/base_config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Load test set
-    with open(state['test_set_path'], 'r') as f:
+    # Iterative model selection must use validation only. The locked test set
+    # is evaluated once after a candidate has been selected.
+    validation_path = state.get("validation_set_path")
+    if not validation_path:
+        raise ValueError("validation_set_path is required; refusing to tune against the locked test set")
+    with open(validation_path, 'r', encoding='utf-8') as f:
         test_data = json.load(f)
     
     test_cases = [TrainingExample(**ex) for ex in test_data]
@@ -197,7 +206,8 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     
     # Save report
-    report_path = Path('outputs/reports') / f"{state['job_id']}_iter{state['iteration']}_report.json"
+    split_name = state.get("evaluation_split", "validation")
+    report_path = Path('outputs/reports') / f"{state['job_id']}_iter{state['iteration']}_{split_name}_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(report_path, 'w') as f:
@@ -210,6 +220,50 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "evaluation_report": report.dict(),
         "report_path": str(report_path),
         "status": "evaluation_complete"
+    }
+
+
+def final_test_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the locked test set exactly once after validation selects a candidate."""
+    test_state = dict(state)
+    test_state["validation_set_path"] = state["test_set_path"]
+    test_state["evaluation_split"] = "test"
+    result = critic_node(test_state)
+    return {
+        "final_test_score": result["evaluation_score"],
+        "final_test_report": result["evaluation_report"],
+        "final_test_report_path": result["report_path"],
+        "final_test_status": "passed" if result["evaluation_score"] >= _evaluation_threshold() else "failed",
+    }
+
+
+def _evaluation_threshold() -> float:
+    import yaml
+    with open("config/base_config.yaml", "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    return float(config["evaluation"]["pass_threshold"])
+
+
+def final_test_decision_node(state: Dict[str, Any]) -> str:
+    """Promote only if the one-time locked test evaluation passes."""
+    score = state.get("final_test_score")
+    if score is None:
+        return "reject"
+    if score >= _evaluation_threshold():
+        return "deploy"
+    return "reject"
+
+
+def final_test_failure_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Reject a candidate that fails the locked test; never tune on test feedback."""
+    console.print("[bold red]Locked test gate failed. Candidate will not be deployed.[/bold red]")
+    return {
+        "status": "failed_final_test",
+        "final_test_score": state.get("final_test_score"),
+        "best_model": state.get("adapter_path"),
+        "error_log": state.get("error_log", []) + [
+            "Candidate failed the locked test gate; test results must not be used for further tuning."
+        ],
     }
 
 
@@ -295,14 +349,16 @@ def deploy_node(state: Dict[str, Any]) -> Dict[str, Any]:
     console.print(f"[green]✓ Model deployed successfully![/green]")
     console.print(f"   Adapter: {state['adapter_path']}")
     console.print(f"   Model: {state.get('model_path', 'N/A')}")
-    console.print(f"   Score: {state['evaluation_score']:.2f}/10")
+    console.print(f"   Validation score: {state['evaluation_score']:.2f}/10")
+    console.print(f"   Locked test score: {state.get('final_test_score', 0.0):.2f}/10")
     
     return {
         "status": "deployed",
         "deployment_info": {
             "adapter_path": state['adapter_path'],
             "model_path": state.get('model_path'),
-            "final_score": state['evaluation_score'],
+            "validation_score": state['evaluation_score'],
+            "final_test_score": state.get("final_test_score"),
             "iterations": state['iteration']
         }
     }
