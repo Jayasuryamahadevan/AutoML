@@ -26,6 +26,20 @@ def test_duplicate_rows_are_removed():
     assert split.duplicates_removed == 1
 
 
+def test_repeated_prompt_with_different_answers_stays_in_one_partition():
+    rows = examples()
+    rows.extend([
+        {"instruction": "same question", "response": "answer A"},
+        {"instruction": "same question", "response": "answer B"},
+    ])
+    split = split_dataset(rows)
+    owners = set()
+    for name, part in (("train", split.train), ("validation", split.validation), ("test", split.test)):
+        if any(row["instruction"] == "same question" for row in part):
+            owners.add(name)
+    assert len(owners) == 1
+
+
 def test_group_ids_do_not_cross_partitions():
     split = split_dataset(examples())
     owners = {}
