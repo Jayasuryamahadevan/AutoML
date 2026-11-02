@@ -15,6 +15,8 @@ from .lineage import LineageStore
 def validate_preference_pairs(rows: Iterable[Dict[str,Any]]) -> List[Dict[str,str]]:
     result=[]; seen=set()
     for n,row in enumerate(rows,1):
+        if not isinstance(row, dict):
+            raise ValueError(f"preference row {n} must be a JSON object")
         prompt=str(row.get("prompt","")).strip(); chosen=str(row.get("chosen","")).strip(); rejected=str(row.get("rejected","")).strip()
         if not prompt or not chosen or not rejected: raise ValueError(f"preference row {n} requires prompt, chosen and rejected")
         if chosen==rejected: raise ValueError(f"preference row {n} has identical chosen/rejected")
@@ -103,12 +105,12 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             return loss
     out=Path(config.output_dir)/run_id; out.mkdir(parents=True,exist_ok=False)
     lineage=LineageStore(str(out/"lineage.sqlite3")); lineage.append(run_id,"dpo_started",{"pairs":len(rows),"beta":beta,"train":len(train),"validation":len(val),"test":len(test)})
-    args=TrainingArguments(output_dir=str(out/"checkpoints"),per_device_train_batch_size=1,per_device_eval_batch_size=1,gradient_accumulation_steps=config.gradient_accumulation_steps,learning_rate=config.learning_rate,num_train_epochs=config.num_train_epochs,logging_steps=config.logging_steps,save_strategy="epoch",evaluation_strategy="epoch",save_total_limit=2,fp16=True,gradient_checkpointing=True,optim="paged_adamw_8bit",report_to="none",remove_unused_columns=False,seed=config.seed)
+    args=TrainingArguments(output_dir=str(out/"checkpoints"),per_device_train_batch_size=1,per_device_eval_batch_size=1,gradient_accumulation_steps=config.gradient_accumulation_steps,learning_rate=config.learning_rate,num_train_epochs=config.num_train_epochs,logging_steps=config.logging_steps,save_strategy="epoch",evaluation_strategy="epoch",load_best_model_at_end=True,metric_for_best_model="eval_loss",greater_is_better=False,save_total_limit=2,fp16=True,gradient_checkpointing=True,optim="paged_adamw_8bit",report_to="none",remove_unused_columns=False,seed=config.seed)
     trainer=DPOTrainer(model=model,args=args,train_dataset=train_ds,eval_dataset=val_ds,data_collator=collate)
     started=time.time(); trained=trainer.train(); validation=trainer.evaluate(val_ds,metric_key_prefix="validation"); locked_test=trainer.evaluate(test_ds,metric_key_prefix="locked_test")
     adapter=out/"adapter"; trainer.model.save_pretrained(adapter); tokenizer.save_pretrained(adapter)
     artifact=write_adapter_manifest(str(adapter),{"run_id":run_id,"stage":"dpo","base_model":config.model_name_or_path,"beta":beta}); integrity=verify_adapter_manifest(str(adapter))
     if not integrity["valid"]: raise RuntimeError("DPO adapter artifact integrity failure")
-    result={"run_id":run_id,"status":"completed","stage":"dpo","train_metrics":trained.metrics,"validation_metrics":validation,"locked_test_metrics":locked_test,"peak_allocated_mb":round(torch.cuda.max_memory_allocated()/1024**2,2),"duration_seconds":round(time.time()-started,2),"adapter_path":str(adapter),"artifact_manifest":artifact,"artifact_verification":integrity,"note":"DPO eval_loss is not a quality score; run independent preference and task benchmarks."}
+    result={"run_id":run_id,"status":"completed","stage":"dpo","train_metrics":trained.metrics,"validation_metrics":validation,"locked_test_metrics":locked_test,"gpu":torch.cuda.get_device_name(0),"gpu_memory":{"peak_allocated_mb":round(torch.cuda.max_memory_allocated()/1024**2,2),"peak_reserved_mb":round(torch.cuda.max_memory_reserved()/1024**2,2),"total_mb":round(torch.cuda.get_device_properties(0).total_memory/1024**2,2)},"duration_seconds":round(time.time()-started,2),"adapter_path":str(adapter),"artifact_manifest":artifact,"artifact_verification":integrity,"note":"DPO eval_loss is not a quality score; run independent preference and task benchmarks."}
     (out/"result.json").write_text(json.dumps(result,indent=2,default=str),encoding="utf-8"); lineage.append(run_id,"dpo_completed",result)
     return result
