@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from autoslm_v3.sft import SFTConfig, _extract_prompt_answer, config_from_json, load_jsonl, prepare_splits
+from autoslm_v3.sft import (SFTConfig, _extract_prompt_answer, _normalized_answer, _token_f1, config_from_json, load_jsonl, prepare_splits)
 
 
 def test_rtx3050_preset_is_valid():
@@ -69,3 +69,13 @@ def test_config_loader(tmp_path):
     config = config_from_json(str(path))
     assert config.target_modules == ("q_proj",)
     assert config.max_seq_length == 256
+
+
+def test_normalized_answer_collapses_whitespace():
+    assert _normalized_answer(" A  B\\nC ") == "a b c"
+
+
+def test_token_f1_is_bounded_and_exact_match_is_one():
+    assert _token_f1("the quick fox", "the quick fox") == 1.0
+    assert 0.0 < _token_f1("the quick fox", "the slow fox") < 1.0
+    assert _token_f1("abc", "xyz") == 0.0
