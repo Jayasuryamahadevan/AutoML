@@ -26,6 +26,26 @@ def validate_preference_pairs(rows: Iterable[Dict[str,Any]]) -> List[Dict[str,st
     if not result: raise ValueError("no valid preference pairs")
     return result
 
+def group_preference_pairs(rows: Iterable[Dict[str,str]]) -> Dict[str,List[Dict[str,str]]]:
+    """Connected components keep prompts and source documents in one split."""
+    parent={}
+    def find(key):
+        parent.setdefault(key,key)
+        if parent[key]!=key: parent[key]=find(parent[key])
+        return parent[key]
+    def union(a,b):
+        ra,rb=find(a),find(b)
+        if ra!=rb: parent[rb]=ra
+    for row in rows:
+        prompt_key="prompt:"+row["prompt"]
+        source_id=row.get("source_document_id")
+        if source_id: union(prompt_key,"source:"+source_id)
+    groups={}
+    for row in rows:
+        groups.setdefault(find("prompt:"+row["prompt"]),[]).append(row)
+    return groups
+
+
 def dpo_loss(policy_chosen_logps,policy_rejected_logps,reference_chosen_logps,reference_rejected_logps,beta:float=0.1):
     if beta<=0: raise ValueError("beta must be positive")
     import torch.nn.functional as F
@@ -50,23 +70,7 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             raw.append(row)
     rows=validate_preference_pairs(raw)
     if len(rows)<10: raise ValueError("DPO requires at least 10 reviewed preference pairs")
-    # Keep repeated prompts and examples from the same source document together.
-    parent={}
-    def find(key):
-        parent.setdefault(key,key)
-        if parent[key]!=key: parent[key]=find(parent[key])
-        return parent[key]
-    def union(a,b):
-        ra,rb=find(a),find(b)
-        if ra!=rb: parent[rb]=ra
-    for row in rows:
-        prompt_key="prompt:"+row["prompt"]
-        source_id=row.get("source_document_id")
-        if source_id: union(prompt_key,"source:"+source_id)
-    groups={}
-    for row in rows:
-        group_key=find("prompt:"+row["prompt"])
-        groups.setdefault(group_key,[]).append(row)
+    groups=group_preference_pairs(rows)
     keys=list(groups)
     if len(keys)<3:
         raise ValueError("DPO requires at least three distinct prompts to create train, validation and test partitions")
