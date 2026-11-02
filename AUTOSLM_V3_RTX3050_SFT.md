@@ -53,14 +53,13 @@ To resume an interrupted run, reuse its run ID and checkpoint path:
 ```bash
 python scripts/train_sft.py --dataset data/train_examples.jsonl --config configs/autoslm_v3_rtx3050.json --run-id YOUR_RUN_ID --resume-from-checkpoint outputs/autoslm_v3/YOUR_RUN_ID/checkpoints/checkpoint-XXX
 ```
-```
 
 Artifacts are written under `outputs/autoslm_v3/<run-id>/`:
 - `splits/`: train, validation, test JSONL
 - `checkpoints/`: Trainer checkpoints
 - `adapter/`: PEFT adapter and tokenizer
 - `experiment_manifest.json`: model/config/data/runtime metadata
-- `lineage.sqlite3`: hash-chained run events
+- `lineage.sqlite3`: hash-chained run events, including training logs, evaluation events and checkpoint saves
 - `locked_test_predictions.jsonl`: greedy-generation predictions with exact-match and token-F1 metrics (lexical proxies, not semantic certification)
 - `result.json`: training, validation and locked-test metrics
 
