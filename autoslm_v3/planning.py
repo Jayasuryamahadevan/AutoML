@@ -14,6 +14,15 @@ class Stage(str, Enum):
 
 
 @dataclass(frozen=True)
+class PlannerPolicy:
+    """Explicit policy knobs; defaults are heuristics, not universal laws."""
+    scratch_pretraining_min_gpu_hours: float = 100.0
+    midtraining_min_raw_tokens: int = 10_000_000
+    sft_min_examples: int = 32
+    preference_min_pairs: int = 100
+
+
+@dataclass(frozen=True)
 class ProjectSpec:
     task: str
     base_model: Optional[str] = None
@@ -53,7 +62,10 @@ class TrainingPlan:
         }
 
 
-def build_training_plan(spec: ProjectSpec) -> TrainingPlan:
+def build_training_plan(
+    spec: ProjectSpec,
+    policy: PlannerPolicy = PlannerPolicy(),
+) -> TrainingPlan:
     """Choose stages from explicit evidence; never infer data or compute."""
     if not spec.task.strip():
         raise ValueError("task must be a non-empty description")
@@ -62,6 +74,11 @@ def build_training_plan(spec: ProjectSpec) -> TrainingPlan:
         raise ValueError("dataset sizes cannot be negative")
     if spec.compute_budget_gpu_hours < 0:
         raise ValueError("compute budget cannot be negative")
+    if min(policy.scratch_pretraining_min_gpu_hours,
+           policy.midtraining_min_raw_tokens,
+           policy.sft_min_examples,
+           policy.preference_min_pairs) < 0:
+        raise ValueError("planner thresholds cannot be negative")
 
     stages: List[StageDecision] = []
     warnings: List[str] = []
@@ -69,10 +86,13 @@ def build_training_plan(spec: ProjectSpec) -> TrainingPlan:
     if spec.train_from_scratch:
         prereqs = ["licensed_corpus", "tokenizer_and_corpus_plan",
                    "compute_and_scaling_plan", "locked_evaluation_suite"]
-        enabled = spec.licensed_corpus and spec.compute_budget_gpu_hours >= 100
+        enabled = (
+            spec.licensed_corpus
+            and spec.compute_budget_gpu_hours >= policy.scratch_pretraining_min_gpu_hours
+        )
         stages.append(StageDecision(
             Stage.PRETRAIN, enabled,
-            "Scratch pretraining is explicitly requested and licensed data plus a minimally credible compute budget are present."
+            "Scratch pretraining is explicitly requested and licensed data plus the configured compute budget are present."
             if enabled else "Not enabled: from-scratch pretraining requires licensed data and a realistic compute plan.",
             prereqs,
         ))
@@ -81,7 +101,7 @@ def build_training_plan(spec: ProjectSpec) -> TrainingPlan:
 
     midtrain_justified = (
         not spec.train_from_scratch
-        and spec.raw_domain_tokens >= 10_000_000
+        and spec.raw_domain_tokens >= policy.midtraining_min_raw_tokens
         and spec.target_domain_shift in {"medium", "high"}
     )
     stages.append(StageDecision(
@@ -91,27 +111,27 @@ def build_training_plan(spec: ProjectSpec) -> TrainingPlan:
         ["raw_text_corpus", "deduplication_and_provenance",
          "general_replay_mixture", "forgetting_regression_suite"],
     ))
-    if spec.raw_domain_tokens and spec.raw_domain_tokens < 10_000_000:
-        warnings.append("Raw domain text is below the conservative mid-training threshold; prefer retrieval or SFT until evidence supports CPT.")
+    if spec.raw_domain_tokens and spec.raw_domain_tokens < policy.midtraining_min_raw_tokens:
+        warnings.append("Raw domain text is below the configured mid-training threshold; prefer retrieval or SFT until evidence supports CPT.")
 
-    sft_enabled = spec.supervised_examples >= 32
+    sft_enabled = spec.supervised_examples >= policy.sft_min_examples
     stages.append(StageDecision(
         Stage.SFT, sft_enabled,
         "Supervised examples are available for instruction/task adaptation."
         if sft_enabled else "Skipped: provide a reviewed supervised dataset before SFT.",
         ["leakage_safe_train_validation_test_split", "chat_template_validation"],
     ))
-    if spec.supervised_examples and spec.supervised_examples < 32:
+    if spec.supervised_examples and spec.supervised_examples < policy.sft_min_examples:
         warnings.append("Small SFT dataset: treat as an experiment; add human review and strong regularization.")
 
-    preference_enabled = spec.preference_pairs >= 100
+    preference_enabled = spec.preference_pairs >= policy.preference_min_pairs
     stages.append(StageDecision(
         Stage.PREFERENCE, preference_enabled,
         "Preference pairs are available for preference optimization."
         if preference_enabled else "Skipped: no sufficiently sized preference dataset.",
         ["chosen_rejected_pairs", "preference_quality_audit", "reference_policy"],
     ))
-    if spec.preference_pairs and spec.preference_pairs < 100:
+    if spec.preference_pairs and spec.preference_pairs < policy.preference_min_pairs:
         warnings.append("Preference dataset is small; do not assume DPO will improve quality.")
 
     stages.append(StageDecision(
