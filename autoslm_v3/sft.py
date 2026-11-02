@@ -128,7 +128,7 @@ def _require_ml_dependencies():
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
         from transformers import (
             AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
-            Trainer, TrainingArguments,
+            Trainer, TrainingArguments, TrainerCallback,
         )
     except ImportError as exc:
         raise RuntimeError(
@@ -137,7 +137,7 @@ def _require_ml_dependencies():
         ) from exc
     return (torch, Dataset, LoraConfig, get_peft_model,
             prepare_model_for_kbit_training, AutoModelForCausalLM,
-            AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments)
+            AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments, TrainerCallback)
 
 
 def _format_prompt(tokenizer, prompt: str) -> str:
@@ -332,6 +332,13 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
         manifest["split_sizes"] = {"train": len(train_rows), "validation": len(validation_rows), "test": len(test_rows)}
         manifest["gpu"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
         manifest["torch_version"] = torch.__version__
+        manifest["cuda_version"] = torch.version.cuda
+        manifest["transformers_version"] = __import__("transformers").__version__
+        manifest["peft_version"] = __import__("peft").__version__
+        try:
+            manifest["bitsandbytes_version"] = __import__("bitsandbytes").__version__
+        except ImportError:
+            manifest["bitsandbytes_version"] = None
         manifest["tokenizer_name"] = config.model_name_or_path
         manifest["tokenizer_vocab_size"] = len(tokenizer)
         (output_dir / "experiment_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -354,9 +361,32 @@ def run_sft(dataset_path: str, config: SFTConfig, run_id: Optional[str] = None, 
             remove_unused_columns=False, dataloader_pin_memory=torch.cuda.is_available(),
             group_by_length=False, seed=config.seed,
         )
+        class _LineageCallback(TrainerCallback):
+            def on_log(self, args, state, control, logs=None, **kwargs):
+                lineage.append(run_id, "training_log", {
+                    "step": state.global_step, "epoch": state.epoch,
+                    "metrics": logs or {},
+                })
+                return control
+
+            def on_save(self, args, state, control, **kwargs):
+                lineage.append(run_id, "checkpoint_saved", {
+                    "step": state.global_step, "checkpoint_dir": args.output_dir,
+                    "best_model_checkpoint": state.best_model_checkpoint,
+                })
+                return control
+
+            def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+                lineage.append(run_id, "evaluation_completed", {
+                    "step": state.global_step, "epoch": state.epoch,
+                    "metrics": metrics or {},
+                })
+                return control
+
         trainer = Trainer(
             model=model, args=args, train_dataset=train_ds,
             eval_dataset=validation_ds, data_collator=_CausalCollator(tokenizer),
+            callbacks=[_LineageCallback()],
         )
         lineage.append(run_id, "training_started", {"trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad)})
         train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
