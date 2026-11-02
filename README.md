@@ -273,3 +273,15 @@ MIT License - see LICENSE file for details
 - [Unsloth](https://github.com/unslothai/unsloth) for efficient fine-tuning
 - [LangGraph](https://github.com/langchain-ai/langgraph) for workflow orchestration
 - [Ollama](https://ollama.ai) for local LLM inference
+
+
+## AutoSLM v3: RTX 3050 QLoRA SFT (experimental)
+
+A separate v3 training path is available on the `autoslm-v3/research-grade-foundation` branch. It uses a conservative 4 GB preset, Qwen2.5-0.5B-Instruct, NF4 QLoRA, LoRA rank 8, microbatch 1, gradient accumulation 8, 512-token context, validation-selected checkpoints and a locked test evaluation.
+
+```bash
+python -m pip install -r requirements.txt
+python scripts/train_sft.py --dataset data/train_examples.jsonl --config configs/autoslm_v3_rtx3050.json
+```
+
+See [AUTOSLM_V3_RTX3050_SFT.md](AUTOSLM_V3_RTX3050_SFT.md) for dataset format, environment checks, resume instructions, artifacts and limitations. The v3 path exports a PEFT adapter; it does not yet implement model merging, GGUF conversion, Ollama deployment, CPT, DPO or GRPO. Run on a CUDA-compatible Linux/WSL2 environment and verify actual peak VRAM on the target laptop before scaling up.
