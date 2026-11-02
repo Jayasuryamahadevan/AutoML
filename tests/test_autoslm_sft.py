@@ -72,7 +72,7 @@ def test_config_loader(tmp_path):
 
 
 def test_normalized_answer_collapses_whitespace():
-    assert _normalized_answer(" A  B\\nC ") == "a b c"
+    assert _normalized_answer(" A  B\nC ") == "a b c"
 
 
 def test_token_f1_is_bounded_and_exact_match_is_one():
