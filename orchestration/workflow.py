@@ -13,7 +13,10 @@ from orchestration.nodes import (
     decision_node,
     adjustment_node,
     deploy_node,
-    failure_node
+    failure_node,
+    final_test_node,
+    final_test_decision_node,
+    final_test_failure_node
 )
 
 console = Console()
@@ -28,12 +31,16 @@ class WorkflowState(TypedDict):
     hyperparameters: dict
     domain_config: dict
     dataset_path: str
+    validation_set_path: str
     test_set_path: str
+    dataset_fingerprint: str
     model_path: str
     adapter_path: str
     training_metrics: dict
     evaluation_score: float
     evaluation_report: dict
+    final_test_score: float
+    final_test_report: dict
     report_path: str
     status: str
     error_log: list
@@ -59,7 +66,9 @@ def create_workflow() -> StateGraph:
     workflow.add_node("train", trainer_node)
     workflow.add_node("evaluate", critic_node)
     workflow.add_node("adjust", adjustment_node)
+    workflow.add_node("final_test", final_test_node)
     workflow.add_node("deploy", deploy_node)
+    workflow.add_node("final_test_failure", final_test_failure_node)
     workflow.add_node("max_retries", failure_node)
     
     # Set entry point
@@ -74,17 +83,28 @@ def create_workflow() -> StateGraph:
         "evaluate",
         decision_node,
         {
-            "deploy": "deploy",
+            "deploy": "final_test",
             "retry": "adjust",
             "max_retries": "max_retries"
         }
     )
     
-    # Retry loop
+    # Only the validation-selected candidate reaches the locked test set.
+    workflow.add_conditional_edges(
+        "final_test",
+        final_test_decision_node,
+        {
+            "deploy": "deploy",
+            "reject": "final_test_failure",
+        }
+    )
+
+    # Retry loop uses validation results only.
     workflow.add_edge("adjust", "train")
-    
+
     # Terminal states
     workflow.add_edge("deploy", END)
+    workflow.add_edge("final_test_failure", END)
     workflow.add_edge("max_retries", END)
     
     return workflow
@@ -144,9 +164,10 @@ def run_workflow(
         console.print("[bold green]✓ Workflow Complete![/bold green]")
         console.print(f"[bold]Final Status:[/bold] {final_state.get('status')}")
         
-        if final_state.get('status') == 'deployed':
+        if final_state.get('status') == 'candidate_accepted_not_deployed':
             info = final_state.get('deployment_info', {})
-            console.print(f"[bold]Final Score:[/bold] {info.get('final_score'):.2f}/10")
+            console.print(f"[bold]Final Test Score (provisional):[/bold] {info.get('final_test_score'):.2f}/10")
+            console.print("[yellow]Artifacts accepted locally; no production serving deployment was performed.[/yellow]")
             console.print(f"[bold]Iterations:[/bold] {info.get('iterations')}")
             console.print(f"[bold]Model Path:[/bold] {info.get('adapter_path')}")
         

@@ -31,27 +31,76 @@ def dataset_generation_node(state: Dict[str, Any]) -> Dict[str, Any]:
         domain_config_path=domain_config
     )
     
-    # Save dataset
+    # Split and deduplicate BEFORE writing any training artifacts. The locked
+    # test partition is never passed to the generator or trainer.
+    from autoslm_v3.data import split_dataset
+
+    split = split_dataset(
+        [example.dict() for example in dataset.examples],
+        test_fraction=config.get("dataset", {}).get("test_split", 0.1),
+        validation_fraction=0.1,
+        seed=config.get("training", {}).get("seed", 42),
+    )
+
     dataset_path = Path('data/datasets') / f"{state['job_id']}_train.jsonl"
-    dataset_path.parent.mkdir(parents=True, exist_ok=True)
-    dataset.to_jsonl(str(dataset_path))
-    
-    # Create test set
-    test_dataset = generator.create_test_set(dataset, test_split=0.1)
+    validation_path = Path('data/validation_sets') / f"{state['job_id']}_validation.json"
     test_path = Path('data/test_sets') / f"{state['job_id']}_test.json"
-    test_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Save test set with full examples (not just JSONL)
-    test_data = [ex.dict() for ex in test_dataset.examples]
-    with open(test_path, 'w') as f:
-        json.dump(test_data, f, indent=2)
-    
-    console.print(f"[green]✓ Dataset saved: {dataset_path}[/green]")
-    console.print(f"[green]✓ Test set saved: {test_path}[/green]")
-    
+    for path in (dataset_path, validation_path, test_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_training_jsonl(path, rows):
+        with path.open("w", encoding="utf-8") as stream:
+            for example in rows:
+                record = {
+                    "instruction": example["instruction"],
+                    "input": "",
+                    "output": example["response"],
+                }
+                stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
+
+    write_training_jsonl(dataset_path, split.train)
+
+    # Keep validation and test as separate, non-training JSON artifacts.
+    def public_examples(rows):
+        return [
+            {
+                "instruction": example["instruction"],
+                "response": example["response"],
+                "category": example.get("category"),
+                "metadata": example.get("metadata") or {},
+            }
+            for example in rows
+        ]
+
+    validation_data = public_examples(split.validation)
+    test_data = public_examples(split.test)
+    with validation_path.open("w", encoding="utf-8") as stream:
+        json.dump(validation_data, stream, ensure_ascii=False, indent=2)
+    with test_path.open("w", encoding="utf-8") as stream:
+        json.dump(test_data, stream, ensure_ascii=False, indent=2)
+
+    manifest_path = Path("data/manifests") / f"{state['job_id']}_dataset.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "dataset_fingerprint": split.fingerprint,
+        "duplicates_removed": split.duplicates_removed,
+        "train_examples": len(split.train),
+        "validation_examples": len(split.validation),
+        "test_examples": len(split.test),
+        "seed": config.get("training", {}).get("seed", 42),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    console.print(f"[green]✓ Training dataset saved: {dataset_path} ({len(split.train)} examples)[/green]")
+    console.print(f"[green]✓ Validation dataset saved: {validation_path} ({len(split.validation)} examples)[/green]")
+    console.print(f"[green]✓ Locked test set saved: {test_path} ({len(split.test)} examples)[/green]")
+
     return {
         "dataset_path": str(dataset_path),
+        "validation_set_path": str(validation_path),
         "test_set_path": str(test_path),
+        "dataset_fingerprint": split.fingerprint,
+        "dataset_manifest_path": str(manifest_path),
         "status": "dataset_ready"
     }
 
@@ -110,8 +159,12 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
     with open('config/base_config.yaml', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Load test set
-    with open(state['test_set_path'], 'r') as f:
+    # Iterative model selection must use validation only. The locked test set
+    # is evaluated once after a candidate has been selected.
+    validation_path = state.get("validation_set_path")
+    if not validation_path:
+        raise ValueError("validation_set_path is required; refusing to tune against the locked test set")
+    with open(validation_path, 'r', encoding='utf-8') as f:
         test_data = json.load(f)
     
     test_cases = [TrainingExample(**ex) for ex in test_data]
@@ -153,7 +206,8 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     
     # Save report
-    report_path = Path('outputs/reports') / f"{state['job_id']}_iter{state['iteration']}_report.json"
+    split_name = state.get("evaluation_split", "validation")
+    report_path = Path('outputs/reports') / f"{state['job_id']}_iter{state['iteration']}_{split_name}_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(report_path, 'w') as f:
@@ -166,6 +220,50 @@ def critic_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "evaluation_report": report.dict(),
         "report_path": str(report_path),
         "status": "evaluation_complete"
+    }
+
+
+def final_test_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the locked test set exactly once after validation selects a candidate."""
+    test_state = dict(state)
+    test_state["validation_set_path"] = state["test_set_path"]
+    test_state["evaluation_split"] = "test"
+    result = critic_node(test_state)
+    return {
+        "final_test_score": result["evaluation_score"],
+        "final_test_report": result["evaluation_report"],
+        "final_test_report_path": result["report_path"],
+        "final_test_status": "passed" if result["evaluation_score"] >= _evaluation_threshold() else "failed",
+    }
+
+
+def _evaluation_threshold() -> float:
+    import yaml
+    with open("config/base_config.yaml", "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    return float(config["evaluation"]["pass_threshold"])
+
+
+def final_test_decision_node(state: Dict[str, Any]) -> str:
+    """Promote only if the one-time locked test evaluation passes."""
+    score = state.get("final_test_score")
+    if score is None:
+        return "reject"
+    if score >= _evaluation_threshold():
+        return "deploy"
+    return "reject"
+
+
+def final_test_failure_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Reject a candidate that fails the locked test; never tune on test feedback."""
+    console.print("[bold red]Locked test gate failed. Candidate will not be deployed.[/bold red]")
+    return {
+        "status": "failed_final_test",
+        "final_test_score": state.get("final_test_score"),
+        "best_model": state.get("adapter_path"),
+        "error_log": state.get("error_log", []) + [
+            "Candidate failed the locked test gate; test results must not be used for further tuning."
+        ],
     }
 
 
@@ -241,24 +339,24 @@ def adjustment_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def deploy_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Deploy the final model."""
-    console.print(f"\n[bold green]🚀 Node: Deployment[/bold green]")
-    
-    # In a real system, this would:
-    # - Push to model registry (HuggingFace Hub, S3, etc.)
-    # - Create deployment config
-    # - Notify monitoring systems
-    
-    console.print(f"[green]✓ Model deployed successfully![/green]")
+    console.print(f"\n[bold green]📦 Node: Candidate Artifact Acceptance[/bold green]")
+
+    # This repository does not yet implement a model registry or serving rollout.
+    # Do not claim production deployment when only local artifacts exist.
+    console.print("[yellow]Candidate passed the current evaluation gate. Artifacts remain local; production deployment is not configured.[/yellow]")
     console.print(f"   Adapter: {state['adapter_path']}")
     console.print(f"   Model: {state.get('model_path', 'N/A')}")
-    console.print(f"   Score: {state['evaluation_score']:.2f}/10")
+    console.print(f"   Validation score: {state['evaluation_score']:.2f}/10")
+    console.print(f"   Locked test score: {state.get('final_test_score', 0.0):.2f}/10")
     
     return {
-        "status": "deployed",
+        "status": "candidate_accepted_not_deployed",
         "deployment_info": {
+            "release_status": "not_deployed",
             "adapter_path": state['adapter_path'],
             "model_path": state.get('model_path'),
-            "final_score": state['evaluation_score'],
+            "validation_score": state['evaluation_score'],
+            "final_test_score": state.get("final_test_score"),
             "iterations": state['iteration']
         }
     }

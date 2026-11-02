@@ -1,0 +1,30 @@
+# Research defaults. Thresholds are conservative starting points, not universal laws.
+version: 3
+planning:
+  midtraining_min_raw_tokens: 10000000
+  midtraining_domain_shift_required:
+    - medium
+    - high
+  sft_min_examples: 32
+  preference_min_pairs: 100
+  scratch_pretraining_min_gpu_hours: 100
+data:
+  seed: 42
+  test_fraction: 0.10
+  validation_fraction: 0.10
+  split_unit: group_id
+  exact_deduplication: true
+  split_before_synthetic_generation: true
+evaluation:
+  primary_metric_minimum_improvement: 0.01
+  maximum_general_capability_regression: 0.02
+  maximum_latency_multiplier: 1.5
+  require_base_model_baseline: true
+  require_safety_pass: true
+  llm_judge_is_sole_promotion_gate: false
+reproducibility:
+  record_code_revision: true
+  record_model_revision: true
+  record_tokenizer_revision: true
+  record_dataset_fingerprints: true
+  record_seed: true

@@ -1,0 +1,143 @@
+# AutoSLM v3 implementation roadmap
+
+This roadmap is intentionally gated by measurable acceptance criteria. A stage is not complete because an agent or trainer class exists; it is complete when its data contract, objective, checkpoint semantics, evaluation and failure recovery are tested.
+
+## Milestone 0 — Scientific foundation (this branch)
+
+- [x] Separate v3 package without breaking v2 imports.
+- [x] Explicit pretrain / midtrain / SFT / preference / RL planning decisions.
+- [x] Deterministic group-aware train/validation/test split with content hashes.
+- [x] Baseline-relative promotion gate.
+- [x] Experiment manifest with config and dataset fingerprints.
+- [x] Initial unit tests.
+- [x] CI result green on GitHub Actions (39 CPU-only tests; no GPU training).
+- [x] Integrate group-aware train/validation/holdout partitioning into the legacy workflow; retries now use validation and the held-out set is evaluated once.
+- [ ] Replace synthetic-only holdout with an externally curated, human-reviewed locked benchmark.
+- [ ] Split source documents/tasks before synthetic augmentation when source corpora are available.
+- [ ] Add source/license/provenance schema and persistent immutable dataset registry.
+
+## Milestone 1 — Data engine
+
+Deliverables:
+- [ ] Source adapters for local files, Hugging Face datasets and approved APIs.
+- Schema validation, language detection, PII policy hooks, license allowlist and provenance.
+- Exact and near-duplicate detection; document/entity-level splitting.
+- Quality scoring calibrated against human-reviewed examples.
+- Synthetic generation only inside train partition; generated data must retain teacher/model/prompt provenance.
+- Dataset cards, fingerprints and immutable versions.
+
+Acceptance:
+- No normalized exact duplicate crosses partitions.
+- Source/document groups never cross partitions.
+- Every training row traces to source or a declared synthetic-generation record.
+- Test data is inaccessible to generation and tuning jobs by API contract.
+
+## Milestone 2 — Baseline and model selection
+
+Deliverables:
+- Model compatibility catalogue (architecture, tokenizer, context length, license, chat template, supported target modules).
+- Hardware profiler (VRAM, RAM, disk, compute capability).
+- Candidate evaluation before training.
+- Task-specific benchmark specification and cost estimator.
+
+Acceptance:
+- Planner rejects incompatible model/trainer combinations before downloading weights.
+- Baseline report is stored before any training starts.
+- Estimated VRAM and disk are checked against available resources.
+
+## Milestone 3 — Post-training engine (first production training path)
+
+Deliverables:
+- SFT backend using current Transformers + TRL SFTTrainer / PEFT.
+- Correct chat-template application and label masking.
+- Gradient accumulation, precision selection, checkpoint/resume and early stopping.
+- Adapter metadata and merge/export validation.
+- Optional DPO backend only for audited preference pairs.
+
+Acceptance:
+- Smoke train on tiny public fixture dataset on CPU where supported or a small GPU fixture.
+- Training can resume from a checkpoint.
+- Adapter reload reproduces inference.
+- Validation is used for selection; locked test is untouched until final evaluation.
+
+## Milestone 4 — Mid-training engine
+
+Deliverables:
+- Causal-LM packing and tokenization pipeline.
+- Domain/general replay mixture with documented sampling ratios.
+- Continued-pretraining trainer backend.
+- Perplexity and downstream evaluation before/after.
+- Forgetting detection and stop/rollback policy.
+
+Acceptance:
+- Domain performance improves against base on locked domain tests.
+- General capability regression remains within a predeclared tolerance.
+- Token count, tokens/sec, GPU hours and data mixture are recorded.
+
+## Milestone 5 — Pretraining research track
+
+Deliverables:
+- Tokenizer training and vocabulary analysis.
+- Corpus governance, deduplication and data mixture design.
+- Distributed training backend, optimizer/scheduler and checkpoint resumption.
+- Scaling experiments and compute budget report.
+- Full reproducibility bundle.
+
+Acceptance:
+- Small-scale reproduction of a training run from manifest.
+- Scaling curves and held-out loss are reported.
+- Legal provenance and compute feasibility are reviewed before launch.
+
+## Milestone 6 — Post-training extensions
+
+- DPO/KTO only with audited preference data.
+- GRPO/RL only with verifiable rewards, unit tests and reward-hacking evaluations.
+- Tool-call SFT and execution-grounded tool-use evaluation.
+- Safety and refusal training with dedicated regression tests.
+
+## Milestone 7 — Release and operations
+
+- Model registry with immutable artifacts and model cards.
+- Adapter/full-model/GGUF export as separate, validated formats.
+- Inference serving, versioned endpoints, canary rollout and rollback.
+- Monitoring for latency, throughput, error rate, drift and safety.
+- Persistent job state, worker isolation and resource quotas.
+
+## First end-to-end target
+
+The first complete v3 release should support: select an instruct base model -> baseline evaluation -> leakage-safe dataset preparation -> QLoRA SFT -> validation-based checkpoint selection -> locked test comparison -> adapter export -> reproducible model card.
+
+Do not implement pretraining first. A reliable SFT path and trustworthy evaluation are the highest-value foundation for the current project's scale and hardware.
+
+
+## Status update — 2026-11-02
+
+The following code deliverables have since landed on this branch:
+- [x] SFT QLoRA Trainer + PEFT path with response-only masking, validation-selected checkpointing, resume support and held-out evaluation.
+- [x] Base-model generation baseline on the same SFT holdout.
+- [x] Peak CUDA allocated/reserved memory capture in SFT results (must be populated by a real GPU run).
+- [x] Adapter SHA-256 inventory and tamper verification.
+- [x] Independent benchmark schema, provenance requirements, per-task metrics and identical-fingerprint base/candidate comparison.
+- [x] Experimental CPT QLoRA runner with license allowlist, source grouping and general replay mixture.
+- [x] Experimental DPO QLoRA runner with prompt-level grouping, license allowlist and frozen reference policy via adapter disabling.
+- [x] CLI entrypoints and CPU contract tests for new stages.
+
+Still open:
+- [ ] Execute SFT, CPT and DPO on the target RTX 3050 and verify real CUDA/bitsandbytes behavior, memory, throughput and resume.
+- [ ] Create a genuinely human-reviewed locked benchmark and run base/SFT/CPT/DPO comparisons.
+- [ ] Add task-specific semantic, factuality, safety and human-preference evaluation.
+- [ ] Validate DPO against the exact pinned Transformers/PEFT/bitsandbytes versions; its CPU CI coverage does not execute the loss/trainer.
+- [ ] Split source corpora before synthetic augmentation and enforce test-set access boundaries.
+- [ ] Add hardware/model compatibility profiling, persistent dataset/model registries, artifact signing, model merging/GGUF/Ollama release, distributed training and reward-verified GRPO.
+
+Do not mark a milestone complete until its acceptance criteria are demonstrated with real runs and retained reports.
+
+
+### Additional implementation update — 2026-11-02
+- [x] Local SQLite adapter registry with artifact verification, immutable version IDs, audit events and alias resolution.
+- [x] Evidence-gated promotion requires a locked benchmark fingerprint, safety pass, human review and zero task regressions.
+- [x] CLI for register/promote/reject/list/resolve.
+- [x] GPU preflight script (non-download default; optional explicit NF4 load/generation smoke test).
+- [x] Benchmark report comparison CLI.
+- [x] Preserve system/user roles for supported single-turn conversational SFT examples.
+- [x] Source-document grouping now reads nested provenance metadata in SFT and DPO splits.
