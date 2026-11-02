@@ -196,7 +196,7 @@ class _CausalCollator:
 
 def _normalized_answer(text: str) -> str:
     import re
-    return re.sub(r"\\s+", " ", text.casefold()).strip()
+    return re.sub(r"\s+", " ", text.casefold()).strip()
 
 
 def _token_f1(prediction: str, reference: str) -> float:
