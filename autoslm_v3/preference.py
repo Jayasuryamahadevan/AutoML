@@ -63,7 +63,8 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
             for name,text in (("chosen",row["chosen"]),("rejected",row["rejected"])):
                 answer=tokenizer(text+(tokenizer.eos_token or ""),add_special_tokens=False)["input_ids"][:config.max_seq_length]
                 p=prompt_ids[-max(0,config.max_seq_length-len(answer)):] if len(answer)<config.max_seq_length else []
-                ids=p+answer; item[name+"_ids"]=ids; item[name+"_labels"]=[-100]*len(p)+answer
+                ids=p+answer; if not answer: raise ValueError(f"preference row has empty tokenized {name} response")
+                item[name+"_ids"]=ids; item[name+"_labels"]=[-100]*len(p)+answer
             output.append(item)
         return output
     def collate(items):
@@ -71,7 +72,7 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
         for name in ("chosen","rejected"):
             maximum=max(len(x[name+"_ids"]) for x in items)
             batch[name+"_ids"]=torch.tensor([x[name+"_ids"]+[tokenizer.pad_token_id]*(maximum-len(x[name+"_ids"])) for x in items],dtype=torch.long)
-            batch[name+"_mask"]=batch[name+"_ids"].ne(tokenizer.pad_token_id).long()
+            batch[name+"_mask"]=torch.tensor([[1]*len(x[name+"_ids"])+[0]*(maximum-len(x[name+"_ids"])) for x in items],dtype=torch.long)
             batch[name+"_labels"]=torch.tensor([x[name+"_labels"]+[-100]*(maximum-len(x[name+"_labels"])) for x in items],dtype=torch.long)
         return batch
     train=[x for k in train_keys for x in groups[k]]; val=[x for k in val_keys for x in groups[k]]; test=[x for k in test_keys for x in groups[k]]
@@ -88,7 +89,10 @@ def run_dpo(dataset_path:str,config:SFTConfig,allowed_licenses:Iterable[str],bet
                 with model.disable_adapter():
                     ref_chosen=_sequence_logps(model,inputs["chosen_ids"],inputs["chosen_mask"],inputs["chosen_labels"])
                     ref_rejected=_sequence_logps(model,inputs["rejected_ids"],inputs["rejected_mask"],inputs["rejected_labels"])
-            return dpo_loss(chosen,rejected,ref_chosen,ref_rejected,beta)
+            loss=dpo_loss(chosen,rejected,ref_chosen,ref_rejected,beta)
+            if return_outputs:
+                return loss, {"loss": loss.detach()}
+            return loss
     out=Path(config.output_dir)/run_id; out.mkdir(parents=True,exist_ok=False)
     lineage=LineageStore(str(out/"lineage.sqlite3")); lineage.append(run_id,"dpo_started",{"pairs":len(rows),"beta":beta,"train":len(train),"validation":len(val),"test":len(test)})
     args=TrainingArguments(output_dir=str(out/"checkpoints"),per_device_train_batch_size=1,per_device_eval_batch_size=1,gradient_accumulation_steps=config.gradient_accumulation_steps,learning_rate=config.learning_rate,num_train_epochs=config.num_train_epochs,logging_steps=config.logging_steps,save_strategy="epoch",evaluation_strategy="epoch",save_total_limit=2,fp16=True,gradient_checkpointing=True,optim="paged_adamw_8bit",report_to="none",remove_unused_columns=False,seed=config.seed)
