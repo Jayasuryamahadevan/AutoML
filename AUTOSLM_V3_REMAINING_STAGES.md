@@ -83,3 +83,26 @@ python scripts/compare_benchmarks.py --baseline outputs/base-report.json --candi
 ```
 
 The command rejects reports with different benchmark fingerprints or task coverage. The resulting metric deltas remain lexical diagnostics; promotion still requires task-specific tests, safety checks and human review.
+
+
+## Local model registry and promotion gate
+
+Register an adapter only after its artifact manifest verifies:
+
+```bash
+python scripts/model_registry.py register --run-id RUN_ID --base-model Qwen/Qwen2.5-0.5B-Instruct --stage sft --adapter outputs/autoslm_v3/RUN_ID/adapter --dataset-fingerprint DATASET_FINGERPRINT
+```
+
+The command returns a `version_id`. Promotion requires a JSON evidence file with all fields below:
+
+```json
+{"benchmark_fingerprint":"sha256-of-locked-benchmark","safety_passed":true,"human_review_passed":true,"task_regressions":[]}
+```
+
+```bash
+python scripts/model_registry.py promote --version-id VERSION_ID --alias production --evidence eval/promotion-evidence.json
+python scripts/model_registry.py resolve --alias production
+python scripts/model_registry.py list
+```
+
+Promotion is intentionally fail-closed when safety or human review is absent or task regressions exist. The registry stores the evidence submitted by the operator; it does not independently prove that a reviewer performed the review or that the benchmark is valid. Protect the SQLite database and evidence files accordingly.
